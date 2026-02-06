@@ -1,16 +1,16 @@
 export type GatewayChainKey = "sepolia" | "avalancheFuji" | "baseSepolia" | "arbitrumSepolia";
 
 export const GATEWAY_CONFIG = {
-  gatewayWallet: "0x0077777d7EBA4688BDeF3E311b846F25870A19B9",
-  gatewayMinter: "0x0022222ABE238Cc2C7Bb1f21003F0a260052475B",
-  apiUrl: "https://gateway-api-testnet.circle.com/v1",
-  destinationChainId: 5042002,
-  destinationUsdc: "0x3600000000000000000000000000000000000000",
+  gatewayWallet: process.env.NEXT_PUBLIC_GATEWAY_WALLET as `${string}`,
+  gatewayMinter: process.env.NEXT_PUBLIC_GATEWAY_MINTER as `${string}`,
+  apiUrl: process.env.NEXT_PUBLIC_GATEWAY_API_URL!,
+  destinationChainId: Number(process.env.NEXT_PUBLIC_DESTINATION_CHAIN_ID),
+  destinationUsdc: process.env.NEXT_PUBLIC_USDC_ARC_TESTNET as `${string}`,
   usdc: {
-    sepolia: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
-    avalancheFuji: "0x5425890298aed601595a70ab815c96711a31bc65",
-    baseSepolia: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
-    arbitrumSepolia: "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d",
+    sepolia: process.env.NEXT_PUBLIC_USDC_SEPOLIA as `${string}`,
+    avalancheFuji: process.env.NEXT_PUBLIC_USDC_AVAX_FUJI as `${string}`,
+    baseSepolia: process.env.NEXT_PUBLIC_USDC_BASE_SEPOLIA as `${string}`,
+    arbitrumSepolia: process.env.NEXT_PUBLIC_USDC_ARBITRUM_SEPOLIA as `${string}`,
   },
   domains: {
     sepolia: 0,

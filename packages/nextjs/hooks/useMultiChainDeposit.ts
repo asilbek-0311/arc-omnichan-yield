@@ -116,6 +116,7 @@ export const useMultiChainDeposit = () => {
             account: address,
           });
 
+          updateState(chainKey, { txHash: approveHash });
           await getPublicClient(chainKey).waitForTransactionReceipt({ hash: approveHash });
 
           updateState(chainKey, { status: "depositing" });
@@ -127,9 +128,10 @@ export const useMultiChainDeposit = () => {
             account: address,
           });
 
+          updateState(chainKey, { txHash: depositHash });
           await getPublicClient(chainKey).waitForTransactionReceipt({ hash: depositHash });
-          updateState(chainKey, { status: "finality" });
-          notification.info(`${chainKey} deposit submitted. Waiting for finality.`);
+          updateState(chainKey, { status: "finality", txHash: depositHash });
+          notification.info(`${chainKey} deposit submitted. Waiting for gateway bridging.`);
         } catch (err) {
           const message = err instanceof Error ? err.message : "Deposit failed";
           updateState(chainKey, { status: "failed", error: message });

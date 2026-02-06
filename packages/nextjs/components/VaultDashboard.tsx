@@ -4,6 +4,13 @@ import { useMemo, useState } from "react";
 import { formatUnits, parseUnits } from "viem";
 import { useAccount, useReadContract } from "wagmi";
 import { useScaffoldReadContract, useScaffoldWriteContract } from "~~/hooks/scaffold-eth";
+import {
+  calculateMaxWithdrawable,
+  calculateUSDCValue,
+  formatSharePrice,
+  formatUSDCValue,
+  formatYRWABalance,
+} from "~~/utils/vault-helpers";
 
 const erc20BalanceAbi = [
   {
@@ -26,6 +33,10 @@ export const VaultDashboard = () => {
     contractName: "RWAVault",
     functionName: "totalAssets",
   });
+  const { data: totalUSDC } = useScaffoldReadContract({
+    contractName: "RWAVault",
+    functionName: "totalUSDC",
+  });
   const { data: yieldTokenAddress } = useScaffoldReadContract({
     contractName: "RWAVault",
     functionName: "yieldToken",
@@ -43,29 +54,42 @@ export const VaultDashboard = () => {
     contractName: "RWAVault",
   });
 
-  const formattedSharePrice = useMemo(() => {
-    if (!sharePrice) return "0.00";
-    return Number(formatUnits(sharePrice, 18)).toFixed(6);
-  }, [sharePrice]);
+  const formattedSharePrice = useMemo(() => formatSharePrice(sharePrice), [sharePrice]);
 
-  const formattedBalance = useMemo(() => {
-    if (!yRwaBalance) return "0.00";
-    return Number(formatUnits(yRwaBalance, 6)).toFixed(6);
-  }, [yRwaBalance]);
+  const formattedBalance = useMemo(() => formatYRWABalance(yRwaBalance), [yRwaBalance]);
 
-  const formattedTotalAssets = useMemo(() => {
-    if (!totalAssets) return "0.00";
-    return Number(formatUnits(totalAssets, 6)).toFixed(2);
-  }, [totalAssets]);
+  const formattedTotalAssets = useMemo(() => formatUSDCValue(totalAssets), [totalAssets]);
 
   const formattedValue = useMemo(() => {
     if (!yRwaBalance || !sharePrice) return "0.00";
-    const value = (yRwaBalance * sharePrice) / 1_000_000_000_000_000_000n;
-    return Number(formatUnits(value, 6)).toFixed(2);
+    const value = calculateUSDCValue(yRwaBalance, sharePrice);
+    return formatUSDCValue(value);
   }, [yRwaBalance, sharePrice]);
+
+  const maxWithdrawable = useMemo(() => {
+    if (!totalUSDC || !sharePrice || sharePrice === 0n) return 0n;
+    return calculateMaxWithdrawable(totalUSDC, sharePrice);
+  }, [totalUSDC, sharePrice]);
+
+  const formattedMaxWithdrawable = useMemo(() => formatYRWABalance(maxWithdrawable), [maxWithdrawable]);
+
+  const withdrawalValue = useMemo(() => {
+    if (!withdrawAmount || !sharePrice) return "0.00";
+    try {
+      const shares = parseUnits(withdrawAmount, 6);
+      const value = (shares * sharePrice) / 1_000_000_000_000_000_000n;
+      return Number(formatUnits(value, 6)).toFixed(2);
+    } catch {
+      return "0.00";
+    }
+  }, [withdrawAmount, sharePrice]);
 
   const onWithdraw = async () => {
     const shares = parseUnits(withdrawAmount || "0", 6);
+    if (shares > maxWithdrawable) {
+      alert(`Insufficient USDC liquidity in vault. Max withdrawable: ${formattedMaxWithdrawable} yRWA`);
+      return;
+    }
     await writeContractAsync({
       functionName: "withdraw",
       args: [shares],
@@ -102,21 +126,61 @@ export const VaultDashboard = () => {
       <div className="card bg-base-100 shadow-xl">
         <div className="card-body">
           <h2 className="card-title">Withdraw</h2>
-          <div className="flex flex-col gap-4 md:flex-row md:items-end">
-            <div className="form-control w-full">
-              <label className="label">
-                <span className="label-text">yRWA Amount</span>
-              </label>
-              <input
-                className="input input-bordered w-full"
-                value={withdrawAmount}
-                onChange={e => setWithdrawAmount(e.target.value)}
-                placeholder="0.00"
-              />
+          <div className="space-y-4">
+            <div className="flex flex-col gap-4 md:flex-row md:items-end">
+              <div className="form-control w-full">
+                <label className="label">
+                  <span className="label-text">yRWA Amount</span>
+                  <span className="label-text-alt">
+                    Max: {formattedMaxWithdrawable} (${withdrawalValue} USDC)
+                  </span>
+                </label>
+                <input
+                  type="number"
+                  className="input input-bordered w-full"
+                  value={withdrawAmount}
+                  onChange={e => setWithdrawAmount(e.target.value)}
+                  placeholder="0.00"
+                  step="0.01"
+                  min="0"
+                  max={formattedMaxWithdrawable}
+                />
+              </div>
+              <button
+                className="btn btn-primary"
+                onClick={onWithdraw}
+                disabled={
+                  isPending ||
+                  !withdrawAmount ||
+                  Number(withdrawAmount) <= 0 ||
+                  parseUnits(withdrawAmount || "0", 6) > maxWithdrawable
+                }
+              >
+                {isPending ? "Withdrawing..." : "Withdraw"}
+              </button>
             </div>
-            <button className="btn btn-primary" onClick={onWithdraw} disabled={isPending}>
-              {isPending ? "Withdrawing..." : "Withdraw"}
-            </button>
+            {totalUSDC !== undefined && maxWithdrawable < (yRwaBalance || 0n) && (
+              <div className="alert alert-warning">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="h-6 w-6 shrink-0 stroke-current"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                  />
+                </svg>
+                <span>
+                  Limited USDC liquidity in vault. You can only withdraw up to {formattedMaxWithdrawable} yRWA.
+                  <br />
+                  Vault has {formatUnits(totalUSDC || 0n, 6)} USDC available.
+                </span>
+              </div>
+            )}
           </div>
         </div>
       </div>

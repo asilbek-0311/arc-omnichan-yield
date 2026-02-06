@@ -166,12 +166,56 @@ const deployedContracts = {
               type: "address",
               internalType: "address",
             },
+            {
+              name: "treasury_",
+              type: "address",
+              internalType: "address",
+            },
           ],
           stateMutability: "nonpayable",
         },
         {
           type: "function",
+          name: "BPS_DENOMINATOR",
+          inputs: [],
+          outputs: [
+            {
+              name: "",
+              type: "uint256",
+              internalType: "uint256",
+            },
+          ],
+          stateMutability: "view",
+        },
+        {
+          type: "function",
+          name: "FEE_BPS",
+          inputs: [],
+          outputs: [
+            {
+              name: "",
+              type: "uint256",
+              internalType: "uint256",
+            },
+          ],
+          stateMutability: "view",
+        },
+        {
+          type: "function",
           name: "deposit",
+          inputs: [
+            {
+              name: "amount",
+              type: "uint256",
+              internalType: "uint256",
+            },
+          ],
+          outputs: [],
+          stateMutability: "nonpayable",
+        },
+        {
+          type: "function",
+          name: "depositYield",
           inputs: [
             {
               name: "amount",
@@ -269,6 +313,19 @@ const deployedContracts = {
         },
         {
           type: "function",
+          name: "treasury",
+          inputs: [],
+          outputs: [
+            {
+              name: "",
+              type: "address",
+              internalType: "address",
+            },
+          ],
+          stateMutability: "view",
+        },
+        {
+          type: "function",
           name: "updateRWAValue",
           inputs: [
             {
@@ -308,6 +365,19 @@ const deployedContracts = {
         },
         {
           type: "function",
+          name: "withdrawForInvestment",
+          inputs: [
+            {
+              name: "amount",
+              type: "uint256",
+              internalType: "uint256",
+            },
+          ],
+          outputs: [],
+          stateMutability: "nonpayable",
+        },
+        {
+          type: "function",
           name: "yieldToken",
           inputs: [],
           outputs: [
@@ -321,7 +391,7 @@ const deployedContracts = {
         },
         {
           type: "event",
-          name: "Deposit",
+          name: "Deposited",
           inputs: [
             {
               name: "user",
@@ -384,7 +454,7 @@ const deployedContracts = {
         },
         {
           type: "event",
-          name: "Withdraw",
+          name: "Withdrawn",
           inputs: [
             {
               name: "user",
@@ -400,6 +470,31 @@ const deployedContracts = {
             },
             {
               name: "usdcOut",
+              type: "uint256",
+              indexed: false,
+              internalType: "uint256",
+            },
+          ],
+          anonymous: false,
+        },
+        {
+          type: "event",
+          name: "YieldDistributed",
+          inputs: [
+            {
+              name: "grossAmount",
+              type: "uint256",
+              indexed: false,
+              internalType: "uint256",
+            },
+            {
+              name: "fee",
+              type: "uint256",
+              indexed: false,
+              internalType: "uint256",
+            },
+            {
+              name: "netAmount",
               type: "uint256",
               indexed: false,
               internalType: "uint256",
@@ -427,6 +522,11 @@ const deployedContracts = {
               internalType: "uint256",
             },
           ],
+        },
+        {
+          type: "error",
+          name: "InvalidTreasury",
+          inputs: [],
         },
         {
           type: "error",
@@ -617,7 +717,7 @@ const deployedContracts = {
       deployedOnBlock: 25147257,
     },
     RWAVault: {
-      address: "0xcf0a060fffbc24a82ad273559fae1e02a9a34062",
+      address: "0xa8c1406ff7c71c030b418f99ef039cd746f2d439",
       abi: [
         {
           type: "constructor",
@@ -632,12 +732,56 @@ const deployedContracts = {
               type: "address",
               internalType: "address",
             },
+            {
+              name: "treasury_",
+              type: "address",
+              internalType: "address",
+            },
           ],
           stateMutability: "nonpayable",
         },
         {
           type: "function",
+          name: "BPS_DENOMINATOR",
+          inputs: [],
+          outputs: [
+            {
+              name: "",
+              type: "uint256",
+              internalType: "uint256",
+            },
+          ],
+          stateMutability: "view",
+        },
+        {
+          type: "function",
+          name: "FEE_BPS",
+          inputs: [],
+          outputs: [
+            {
+              name: "",
+              type: "uint256",
+              internalType: "uint256",
+            },
+          ],
+          stateMutability: "view",
+        },
+        {
+          type: "function",
           name: "deposit",
+          inputs: [
+            {
+              name: "amount",
+              type: "uint256",
+              internalType: "uint256",
+            },
+          ],
+          outputs: [],
+          stateMutability: "nonpayable",
+        },
+        {
+          type: "function",
+          name: "depositYield",
           inputs: [
             {
               name: "amount",
@@ -735,6 +879,19 @@ const deployedContracts = {
         },
         {
           type: "function",
+          name: "treasury",
+          inputs: [],
+          outputs: [
+            {
+              name: "",
+              type: "address",
+              internalType: "address",
+            },
+          ],
+          stateMutability: "view",
+        },
+        {
+          type: "function",
           name: "updateRWAValue",
           inputs: [
             {
@@ -774,6 +931,19 @@ const deployedContracts = {
         },
         {
           type: "function",
+          name: "withdrawForInvestment",
+          inputs: [
+            {
+              name: "amount",
+              type: "uint256",
+              internalType: "uint256",
+            },
+          ],
+          outputs: [],
+          stateMutability: "nonpayable",
+        },
+        {
+          type: "function",
           name: "yieldToken",
           inputs: [],
           outputs: [
@@ -787,7 +957,7 @@ const deployedContracts = {
         },
         {
           type: "event",
-          name: "Deposit",
+          name: "Deposited",
           inputs: [
             {
               name: "user",
@@ -850,7 +1020,7 @@ const deployedContracts = {
         },
         {
           type: "event",
-          name: "Withdraw",
+          name: "Withdrawn",
           inputs: [
             {
               name: "user",
@@ -866,6 +1036,31 @@ const deployedContracts = {
             },
             {
               name: "usdcOut",
+              type: "uint256",
+              indexed: false,
+              internalType: "uint256",
+            },
+          ],
+          anonymous: false,
+        },
+        {
+          type: "event",
+          name: "YieldDistributed",
+          inputs: [
+            {
+              name: "grossAmount",
+              type: "uint256",
+              indexed: false,
+              internalType: "uint256",
+            },
+            {
+              name: "fee",
+              type: "uint256",
+              indexed: false,
+              internalType: "uint256",
+            },
+            {
+              name: "netAmount",
               type: "uint256",
               indexed: false,
               internalType: "uint256",
@@ -893,6 +1088,11 @@ const deployedContracts = {
               internalType: "uint256",
             },
           ],
+        },
+        {
+          type: "error",
+          name: "InvalidTreasury",
+          inputs: [],
         },
         {
           type: "error",
@@ -934,7 +1134,7 @@ const deployedContracts = {
         },
       ],
       inheritedFunctions: {},
-      deployedOnBlock: 25151172,
+      deployedOnBlock: 25629638,
     },
   },
 } as const;

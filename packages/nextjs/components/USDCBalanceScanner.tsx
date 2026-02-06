@@ -120,23 +120,51 @@ export const USDCBalanceScanner = ({ onSelectionChange }: Props) => {
             <span>Scanning chains...</span>
           </div>
         ) : (
-          <div className="grid gap-4 md:grid-cols-2">
-            {rows.map(row => (
-              <div key={row.chainKey} className="flex items-center justify-between rounded-xl bg-base-200 p-4">
-                <div>
-                  <div className="font-semibold">{row.chainName}</div>
-                  <div className="text-sm opacity-70">{row.formatted} USDC</div>
+          <>
+            <div className="grid gap-4 md:grid-cols-2">
+              {rows.map(row => (
+                <div
+                  key={row.chainKey}
+                  className={`flex items-center justify-between rounded-xl p-4 ${
+                    row.balance === 0n ? "bg-base-200 opacity-50" : "bg-base-200"
+                  }`}
+                >
+                  <div>
+                    <div className="font-semibold">{row.chainName}</div>
+                    <div className="text-sm opacity-70">{row.formatted} USDC</div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    className="checkbox"
+                    disabled={row.balance === 0n}
+                    checked={row.selected}
+                    onChange={() => toggleRow(row.chainKey)}
+                  />
                 </div>
-                <input
-                  type="checkbox"
-                  className="checkbox"
-                  disabled={row.balance === 0n}
-                  checked={row.selected}
-                  onChange={() => toggleRow(row.chainKey)}
-                />
+              ))}
+            </div>
+            {total === 0 && (
+              <div className="alert alert-warning mt-4">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="h-6 w-6 shrink-0 stroke-current"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                  />
+                </svg>
+                <span>
+                  No USDC detected on any supported chains. Please acquire USDC on Sepolia, Arbitrum Sepolia, Base
+                  Sepolia, or Avalanche Fuji to continue.
+                </span>
               </div>
-            ))}
-          </div>
+            )}
+          </>
         )}
         <div className="mt-4 text-right text-sm opacity-70">Total detected: {total.toFixed(2)} USDC</div>
       </div>
