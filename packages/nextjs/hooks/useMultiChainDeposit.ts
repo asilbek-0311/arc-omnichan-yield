@@ -62,6 +62,9 @@ const getPublicClient = (chainKey: GatewayChainKey) => {
   });
 };
 
+// MAX uint256 for infinite approval
+const MAX_UINT256 = BigInt("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
+
 export const useMultiChainDeposit = () => {
   const { address } = useAccount();
   const { data: walletClient } = useWalletClient();
@@ -91,6 +94,57 @@ export const useMultiChainDeposit = () => {
     }));
   }, []);
 
+  const depositToChain = useCallback(
+    async (req: DepositRequest) => {
+      if (!address || !walletClient) return;
+
+      const chainKey = req.chainKey;
+      const usdcAddress = GATEWAY_CONFIG.usdc[chainKey] as Address;
+
+      try {
+        updateState(chainKey, { status: "switching", amount: req.amount, error: undefined });
+        await switchChainAsync({ chainId: GATEWAY_CONFIG.chainIds[chainKey] });
+
+        updateState(chainKey, { status: "approving" });
+        const approveHash = await walletClient.writeContract({
+          address: usdcAddress,
+          abi: erc20Abi,
+          functionName: "approve",
+          args: [GATEWAY_CONFIG.gatewayWallet as Address, MAX_UINT256], // ← Approve unlimited
+          account: address,
+        });
+
+        updateState(chainKey, { txHash: approveHash });
+        await getPublicClient(chainKey).waitForTransactionReceipt({
+          hash: approveHash,
+          timeout: 60_000, // 1 min timeout
+        });
+
+        updateState(chainKey, { status: "depositing" });
+        const depositHash = await walletClient.writeContract({
+          address: GATEWAY_CONFIG.gatewayWallet as Address,
+          abi: gatewayWalletAbi,
+          functionName: "deposit",
+          args: [usdcAddress, req.amount],
+          account: address,
+        });
+
+        updateState(chainKey, { txHash: depositHash });
+        await getPublicClient(chainKey).waitForTransactionReceipt({
+          hash: depositHash,
+          timeout: 60_000, // 1 min timeout
+        });
+        updateState(chainKey, { status: "finality", txHash: depositHash });
+        notification.info(`${chainKey} deposit submitted. Waiting for gateway bridging.`);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Deposit failed";
+        updateState(chainKey, { status: "failed", error: message });
+        notification.error(`${chainKey} failed: ${message}`);
+      }
+    },
+    [address, switchChainAsync, updateState, walletClient],
+  );
+
   const startDeposit = useCallback(
     async (requests: DepositRequest[]) => {
       if (!address || !walletClient) {
@@ -98,48 +152,13 @@ export const useMultiChainDeposit = () => {
         return;
       }
 
-      for (const req of requests) {
-        if (req.amount === 0n) continue;
-        const chainKey = req.chainKey;
-        const usdcAddress = GATEWAY_CONFIG.usdc[chainKey] as Address;
+      // Filter out zero amounts
+      const validRequests = requests.filter(req => req.amount > 0n);
 
-        try {
-          updateState(chainKey, { status: "switching", amount: req.amount, error: undefined });
-          await switchChainAsync({ chainId: GATEWAY_CONFIG.chainIds[chainKey] });
-
-          updateState(chainKey, { status: "approving" });
-          const approveHash = await walletClient.writeContract({
-            address: usdcAddress,
-            abi: erc20Abi,
-            functionName: "approve",
-            args: [GATEWAY_CONFIG.gatewayWallet as Address, req.amount],
-            account: address,
-          });
-
-          updateState(chainKey, { txHash: approveHash });
-          await getPublicClient(chainKey).waitForTransactionReceipt({ hash: approveHash });
-
-          updateState(chainKey, { status: "depositing" });
-          const depositHash = await walletClient.writeContract({
-            address: GATEWAY_CONFIG.gatewayWallet as Address,
-            abi: gatewayWalletAbi,
-            functionName: "deposit",
-            args: [usdcAddress, req.amount],
-            account: address,
-          });
-
-          updateState(chainKey, { txHash: depositHash });
-          await getPublicClient(chainKey).waitForTransactionReceipt({ hash: depositHash });
-          updateState(chainKey, { status: "finality", txHash: depositHash });
-          notification.info(`${chainKey} deposit submitted. Waiting for gateway bridging.`);
-        } catch (err) {
-          const message = err instanceof Error ? err.message : "Deposit failed";
-          updateState(chainKey, { status: "failed", error: message });
-          notification.error(`${chainKey} failed: ${message}`);
-        }
-      }
+      // Execute all chains in parallel
+      await Promise.allSettled(validRequests.map(req => depositToChain(req)));
     },
-    [address, switchChainAsync, updateState, walletClient],
+    [address, depositToChain, walletClient],
   );
 
   const summary = useMemo(() => Object.values(states), [states]);

@@ -7,8 +7,17 @@ export const useGatewayBalance = (address?: string) => {
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
-    let intervalId: NodeJS.Timeout | null = null;
+    let timeoutId: NodeJS.Timeout | null = null;
     let isMounted = true;
+    let pollCount = 0;
+    const maxPolls = 20; // Stop after ~10 minutes
+
+    // Exponential backoff: fast at first, then slower
+    const getInterval = (count: number) => {
+      if (count < 10) return 3_000; // 0-30s: check every 3s (fast detection)
+      if (count < 20) return 10_000; // 30s-2min: check every 10s
+      return 30_000; // 2min+: check every 30s
+    };
 
     const fetchBalances = async () => {
       if (!address) {
@@ -33,12 +42,29 @@ export const useGatewayBalance = (address?: string) => {
       }
     };
 
-    fetchBalances();
-    intervalId = setInterval(fetchBalances, 30_000);
+    const schedulePoll = () => {
+      if (!isMounted || pollCount >= maxPolls) {
+        return;
+      }
+
+      const interval = getInterval(pollCount);
+      timeoutId = setTimeout(() => {
+        fetchBalances().then(() => {
+          pollCount++;
+          schedulePoll();
+        });
+      }, interval);
+    };
+
+    // Initial fetch
+    fetchBalances().then(() => {
+      pollCount++;
+      schedulePoll();
+    });
 
     return () => {
       isMounted = false;
-      if (intervalId) clearInterval(intervalId);
+      if (timeoutId) clearTimeout(timeoutId);
     };
   }, [address]);
 

@@ -44,6 +44,9 @@ const erc20Abi = [
   },
 ] as const;
 
+// MAX uint256 for infinite approval
+const MAX_UINT256 = BigInt("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
+
 export const useVaultDeposit = () => {
   const { address } = useAccount();
   const { data: walletClient } = useWalletClient();
@@ -98,18 +101,21 @@ export const useVaultDeposit = () => {
 
         // Step 4: Approve USDC to vault if needed
         if (currentAllowance < amount) {
-          notification.info("Approving USDC to vault...");
+          notification.info("Approving unlimited USDC to vault...");
           const approveHash = await walletClient.writeContract({
             address: GATEWAY_CONFIG.destinationUsdc as `0x${string}`,
             abi: erc20Abi,
             functionName: "approve",
-            args: [vaultInfo.address, amount],
+            args: [vaultInfo.address, MAX_UINT256], // ← Approve unlimited
             chain: walletClient.chain,
             account: address,
           });
 
           notification.info("Waiting for approval confirmation...");
-          await publicClient.waitForTransactionReceipt({ hash: approveHash });
+          await publicClient.waitForTransactionReceipt({
+            hash: approveHash,
+            timeout: 60_000, // 1 min timeout
+          });
           notification.success("USDC approved!");
         } else {
           notification.info("USDC already approved");
@@ -139,7 +145,10 @@ export const useVaultDeposit = () => {
         setState({ status: "depositing", amount, txHash: depositHash });
         notification.info("Waiting for deposit confirmation...");
 
-        await publicClient.waitForTransactionReceipt({ hash: depositHash });
+        await publicClient.waitForTransactionReceipt({
+          hash: depositHash,
+          timeout: 60_000, // 1 min timeout
+        });
 
         setState({ status: "completed", amount, txHash: depositHash });
         notification.success(`Successfully deposited ${formatUnits(amount, 6)} USDC to vault!`);

@@ -3,11 +3,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { formatUnits, parseUnits } from "viem";
 import { useAccount, useChainId } from "wagmi";
+import { DepositHistory } from "~~/components/DepositHistory";
 import { USDCBalanceScanner } from "~~/components/USDCBalanceScanner";
 import { useGatewayBalance } from "~~/hooks/useGatewayBalance";
 import { useMultiChainDeposit } from "~~/hooks/useMultiChainDeposit";
 import { useVaultDeposit } from "~~/hooks/useVaultDeposit";
 import { GATEWAY_CONFIG, type GatewayChainKey } from "~~/lib/gateway-config";
+import { notification } from "~~/utils/scaffold-eth";
 
 type SelectedRow = {
   chainKey: GatewayChainKey;
@@ -34,6 +36,7 @@ export const GatewayDeposit = () => {
   const vaultDeposit = useVaultDeposit();
   const [selectedRows, setSelectedRows] = useState<SelectedRow[]>([]);
   const [depositAmount, setDepositAmount] = useState("");
+  const [autoDepositTriggered, setAutoDepositTriggered] = useState(false);
 
   const handleSelectionChange = useCallback((rows: SelectedRow[]) => {
     setSelectedRows(rows.map(row => ({ chainKey: row.chainKey, balance: row.balance, selected: row.selected })));
@@ -72,13 +75,71 @@ export const GatewayDeposit = () => {
     }
   }, [arcBalance]);
 
+  // Auto-detect Arc balance and scroll to Step 4
+  useEffect(() => {
+    if (arcBalance && arcBalance > 0n && !autoDepositTriggered && hasGatewayDeposits) {
+      // Set deposit amount to full Arc balance
+      setDepositAmount(formatUnits(arcBalance, 6));
+
+      // Show success notification
+      notification.success("✅ USDC bridged to Arc successfully! Scroll down to deposit to vault.", {
+        duration: 10000,
+      });
+
+      // Wait 1s for notification to show, then scroll
+      setTimeout(() => {
+        const element = document.getElementById("step-4-vault-deposit");
+        if (element) {
+          element.scrollIntoView({
+            behavior: "smooth",
+            block: "center",
+          });
+        }
+      }, 1000);
+
+      setAutoDepositTriggered(true);
+    }
+  }, [arcBalance, autoDepositTriggered, hasGatewayDeposits]);
+
+  // Calculate progress
+  const completedSteps = useMemo(() => summary.filter(s => s.status === "finality").length, [summary]);
+  const totalSteps = useMemo(() => summary.filter(s => s.amount > 0n).length, [summary]);
+  const progressPercent = totalSteps > 0 ? (completedSteps / totalSteps) * 100 : 0;
+
   return (
     <div className="space-y-6">
+      {/* Deposit History */}
+      <DepositHistory />
+
       {/* Step 1: Select chains and deposit to gateway */}
       <div className="card bg-base-100 shadow-xl">
         <div className="card-body">
           <h2 className="card-title">Step 1: Select Chains & Deposit to Gateway</h2>
           <USDCBalanceScanner onSelectionChange={handleSelectionChange} />
+
+          {/* Warning for parallel approvals */}
+          {selected.length > 0 && (
+            <div className="alert alert-info mt-4">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                className="h-6 w-6 shrink-0 stroke-current"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
+              </svg>
+              <span>
+                You will need to approve {selected.length * 2} wallet transactions quickly for best speed. Stay at your
+                wallet and approve each one as it appears.
+              </span>
+            </div>
+          )}
+
           <button className="btn btn-primary mt-4" disabled={selected.length === 0} onClick={onDeposit}>
             Deposit to Gateway
           </button>
@@ -89,6 +150,22 @@ export const GatewayDeposit = () => {
       <div className="card bg-base-100 shadow-xl">
         <div className="card-body">
           <h2 className="card-title">Step 2: Gateway Deposit Status</h2>
+
+          {/* Progress bar */}
+          {totalSteps > 0 && (
+            <div className="mt-2 mb-4">
+              <div className="w-full bg-base-300 rounded-full h-2.5">
+                <div
+                  className="bg-primary h-2.5 rounded-full transition-all duration-300"
+                  style={{ width: `${progressPercent}%` }}
+                />
+              </div>
+              <div className="text-sm opacity-70 mt-1">
+                {completedSteps} of {totalSteps} chains completed
+              </div>
+            </div>
+          )}
+
           <div className="space-y-2">
             {summary
               .filter(row => row.amount > 0n)
@@ -162,7 +239,7 @@ export const GatewayDeposit = () => {
 
       {/* Step 4: Deposit to vault on Arc */}
       {arcBalance && arcBalance > 0n && (
-        <div className="card bg-base-100 shadow-xl">
+        <div id="step-4-vault-deposit" className="card bg-base-100 shadow-xl">
           <div className="card-body">
             <h2 className="card-title">Step 4: Deposit to Vault & Mint yRWA</h2>
             <div className="alert alert-success">
