@@ -25,10 +25,11 @@ contract RWAVaultTest is Test {
 
     address public owner = address(0xABCD);
     address public user = address(0xBEEF);
+    address public treasury = address(0xCAFE);
 
     function setUp() public {
         usdc = new MockUSDC();
-        vault = new RWAVault(address(usdc), owner);
+        vault = new RWAVault(address(usdc), owner, treasury);
         yRWA = vault.yieldToken();
     }
 
@@ -55,10 +56,16 @@ contract RWAVaultTest is Test {
         vault.deposit(depositAmount);
         vm.stopPrank();
 
-        vm.prank(owner);
-        vault.updateRWAValue(1_000_000); // +1 USDC in off-chain value
+        uint256 yieldAmount = 1_000_000; // 1 USDC
+        usdc.mint(owner, yieldAmount);
+        vm.startPrank(owner);
+        usdc.approve(address(vault), yieldAmount);
+        vault.depositYield(yieldAmount);
+        vm.stopPrank();
 
-        uint256 expectedSharePrice = ((depositAmount + 1_000_000) * 1e18) / depositAmount;
+        uint256 fee = (yieldAmount * vault.FEE_BPS()) / vault.BPS_DENOMINATOR();
+        uint256 netYield = yieldAmount - fee;
+        uint256 expectedSharePrice = ((depositAmount + netYield) * 1e18) / depositAmount;
         assertEq(vault.sharePrice(), expectedSharePrice);
     }
 
@@ -71,11 +78,12 @@ contract RWAVaultTest is Test {
         vault.deposit(depositAmount);
         vm.stopPrank();
 
-        vm.prank(owner);
-        vault.updateRWAValue(1_000_000); // +1 USDC in off-chain value
-
-        // Simulate USDC liquidity to cover yield
-        usdc.mint(address(vault), 1_000_000);
+        uint256 yieldAmount = 1_000_000; // 1 USDC
+        usdc.mint(owner, yieldAmount);
+        vm.startPrank(owner);
+        usdc.approve(address(vault), yieldAmount);
+        vault.depositYield(yieldAmount);
+        vm.stopPrank();
 
         uint256 sharesToRedeem = depositAmount;
         uint256 expectedOut = (sharesToRedeem * vault.sharePrice()) / 1e18;
@@ -110,5 +118,38 @@ contract RWAVaultTest is Test {
         vm.prank(user);
         vm.expectRevert();
         vault.updateRWAValue(1_000_000);
+    }
+
+    function testDepositYieldTakesFeeToTreasury() public {
+        uint256 yieldAmount = 1_000_000; // 1 USDC
+        usdc.mint(owner, yieldAmount);
+
+        vm.startPrank(owner);
+        usdc.approve(address(vault), yieldAmount);
+        vault.depositYield(yieldAmount);
+        vm.stopPrank();
+
+        uint256 fee = (yieldAmount * vault.FEE_BPS()) / vault.BPS_DENOMINATOR();
+        assertEq(usdc.balanceOf(treasury), fee);
+        assertEq(usdc.balanceOf(address(vault)), yieldAmount - fee);
+    }
+
+    function testWithdrawForInvestmentOnlyOwner() public {
+        uint256 depositAmount = 2_000_000;
+        usdc.mint(user, depositAmount);
+
+        vm.startPrank(user);
+        usdc.approve(address(vault), depositAmount);
+        vault.deposit(depositAmount);
+        vm.stopPrank();
+
+        vm.prank(user);
+        vm.expectRevert();
+        vault.withdrawForInvestment(1_000_000);
+    }
+
+    function testZeroDepositReverts() public {
+        vm.expectRevert();
+        vault.deposit(0);
     }
 }

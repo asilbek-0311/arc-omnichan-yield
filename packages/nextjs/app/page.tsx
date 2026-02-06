@@ -1,11 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { Address } from "@scaffold-ui/components";
 import type { NextPage } from "next";
-import { hardhat } from "viem/chains";
 import { useAccount } from "wagmi";
-import { BugAntIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 import { useTargetNetwork } from "~~/hooks/scaffold-eth";
 
 const Home: NextPage = () => {
@@ -14,62 +11,46 @@ const Home: NextPage = () => {
 
   return (
     <>
-      <div className="flex items-center flex-col grow pt-10">
-        <div className="px-5">
-          <h1 className="text-center">
-            <span className="block text-2xl mb-2">Welcome to</span>
-            <span className="block text-4xl font-bold">Scaffold-ETH 2</span>
-          </h1>
-          <div className="flex justify-center items-center space-x-2 flex-col">
-            <p className="my-2 font-medium">Connected Address:</p>
-            <Address
-              address={connectedAddress}
-              chain={targetNetwork}
-              blockExplorerAddressLink={
-                targetNetwork.id === hardhat.id ? `/blockexplorer/address/${connectedAddress}` : undefined
-              }
-            />
+      <div className="flex items-center flex-col grow">
+        <div className="hero min-h-[70vh] bg-base-200">
+          <div className="hero-content text-center">
+            <div className="max-w-3xl">
+              <h1 className="text-4xl font-bold md:text-6xl">Omni-Yield</h1>
+              <p className="py-4 text-lg opacity-80">
+                Earn RWA-backed yield on USDC across chains. Deposit once, mint yRWA on Arc Testnet, and let your
+                capital work.
+              </p>
+              <div className="flex flex-wrap justify-center gap-3">
+                <Link href="/deposit" className="btn btn-primary">
+                  Deposit USDC
+                </Link>
+                <Link href="/vault" className="btn btn-outline">
+                  View Vault
+                </Link>
+              </div>
+              <div className="mt-4 text-sm opacity-70">
+                Connected: {connectedAddress ? `${connectedAddress.slice(0, 6)}...${connectedAddress.slice(-4)}` : "—"}
+              </div>
+              <div className="mt-2 text-sm opacity-70">Network: {targetNetwork.name}</div>
+            </div>
           </div>
-
-          <p className="text-center text-lg">
-            Get started by editing{" "}
-            <code className="italic bg-base-300 text-base font-bold max-w-full break-words break-all inline-block">
-              packages/nextjs/app/page.tsx
-            </code>
-          </p>
-          <p className="text-center text-lg">
-            Edit your smart contract{" "}
-            <code className="italic bg-base-300 text-base font-bold max-w-full break-words break-all inline-block">
-              YourContract.sol
-            </code>{" "}
-            in{" "}
-            <code className="italic bg-base-300 text-base font-bold max-w-full break-words break-all inline-block">
-              packages/hardhat/contracts
-            </code>
-          </p>
         </div>
 
-        <div className="grow bg-base-300 w-full mt-16 px-8 py-12">
-          <div className="flex justify-center items-center gap-12 flex-col md:flex-row">
-            <div className="flex flex-col bg-base-100 px-10 py-10 text-center items-center max-w-xs rounded-3xl">
-              <BugAntIcon className="h-8 w-8 fill-secondary" />
-              <p>
-                Tinker with your smart contract using the{" "}
-                <Link href="/debug" passHref className="link">
-                  Debug Contracts
-                </Link>{" "}
-                tab.
+        <div className="w-full bg-base-300 px-8 py-12">
+          <div className="mx-auto grid max-w-5xl gap-6 md:grid-cols-3">
+            <div className="rounded-3xl bg-base-100 p-6 shadow-xl">
+              <h3 className="text-lg font-semibold">Multi-chain deposits</h3>
+              <p className="mt-2 text-sm opacity-70">
+                Use Circle Gateway to move USDC from multiple testnets in one flow.
               </p>
             </div>
-            <div className="flex flex-col bg-base-100 px-10 py-10 text-center items-center max-w-xs rounded-3xl">
-              <MagnifyingGlassIcon className="h-8 w-8 fill-secondary" />
-              <p>
-                Explore your local transactions with the{" "}
-                <Link href="/blockexplorer" passHref className="link">
-                  Block Explorer
-                </Link>{" "}
-                tab.
-              </p>
+            <div className="rounded-3xl bg-base-100 p-6 shadow-xl">
+              <h3 className="text-lg font-semibold">RWA-backed yield</h3>
+              <p className="mt-2 text-sm opacity-70">Track share price growth as off-chain yield is deposited.</p>
+            </div>
+            <div className="rounded-3xl bg-base-100 p-6 shadow-xl">
+              <h3 className="text-lg font-semibold">Transparent vault</h3>
+              <p className="mt-2 text-sm opacity-70">Monitor TVL, share price, and admin activity on-chain.</p>
             </div>
           </div>
         </div>

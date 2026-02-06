@@ -16,7 +16,8 @@ contract DeployScript is ScaffoldETHDeploy {
         // Deploys all your contracts sequentially
         // Add new deployments here when needed
         address usdcAddress = vm.envAddress("USDC_ADDRESS");
-        new RWAVault(usdcAddress, deployer);
+        address treasuryAddress = vm.envAddress("TREASURY_ADDRESS");
+        new RWAVault(usdcAddress, deployer, treasuryAddress);
 
         // Optional: keep scaffold example deployment
         // DeployYourContract deployYourContract = new DeployYourContract();

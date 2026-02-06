@@ -14,7 +14,7 @@ contract YieldToken is ERC20, Ownable {
      * @notice Initializes the yRWA token.
      * @param owner_ The vault contract that controls mint/burn.
      */
-    constructor(address owner_) ERC20("Yield RWA", "yRWA") Ownable(owner_) { }
+    constructor(address owner_) ERC20("Omni Yield RWA", "yRWA") Ownable(owner_) { }
 
     /**
      * @notice Returns token decimals (matches USDC).

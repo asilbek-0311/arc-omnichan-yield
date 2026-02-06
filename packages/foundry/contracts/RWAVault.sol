@@ -17,11 +17,14 @@ contract RWAVault is Ownable, ReentrancyGuard {
 
     error AmountZero();
     error InsufficientUSDC(uint256 requested, uint256 available);
+    error InvalidTreasury();
 
     /// @notice Emitted when a user deposits USDC and receives yRWA.
-    event Deposit(address indexed user, uint256 usdcIn, uint256 sharesMinted);
+    event Deposited(address indexed user, uint256 usdcIn, uint256 sharesMinted);
     /// @notice Emitted when a user burns yRWA and receives USDC.
-    event Withdraw(address indexed user, uint256 sharesBurned, uint256 usdcOut);
+    event Withdrawn(address indexed user, uint256 sharesBurned, uint256 usdcOut);
+    /// @notice Emitted when yield is deposited and fees are taken.
+    event YieldDistributed(uint256 grossAmount, uint256 fee, uint256 netAmount);
     /// @notice Emitted when off-chain RWA value is updated.
     event RWAValueUpdated(uint256 oldValue, uint256 newValue);
 
@@ -31,16 +34,25 @@ contract RWAVault is Ownable, ReentrancyGuard {
     YieldToken public immutable yieldToken;
     /// @notice Off-chain RWA holdings value in USDC decimals.
     uint256 public totalRWAValue;
+    /// @notice Treasury address that receives yield fees.
+    address public treasury;
+
+    uint256 public constant FEE_BPS = 2000;
+    uint256 public constant BPS_DENOMINATOR = 10_000;
 
     /**
      * @notice Initializes the vault.
      * @param usdc_ Address of the USDC token.
      * @param owner_ Vault admin that can update RWA value.
      */
-    constructor(address usdc_, address owner_) Ownable(owner_) {
+    constructor(address usdc_, address owner_, address treasury_) Ownable(owner_) {
         require(usdc_ != address(0), "USDC_ADDRESS_ZERO");
+        if (treasury_ == address(0)) {
+            revert InvalidTreasury();
+        }
         usdc = IERC20(usdc_);
         yieldToken = new YieldToken(address(this));
+        treasury = treasury_;
     }
 
     /**
@@ -77,9 +89,10 @@ contract RWAVault is Ownable, ReentrancyGuard {
         if (amount == 0) {
             revert AmountZero();
         }
+        uint256 shares = (amount * 1e18) / sharePrice();
         usdc.safeTransferFrom(msg.sender, address(this), amount);
-        yieldToken.mint(msg.sender, amount);
-        emit Deposit(msg.sender, amount, amount);
+        yieldToken.mint(msg.sender, shares);
+        emit Deposited(msg.sender, amount, shares);
     }
 
     /**
@@ -97,7 +110,41 @@ contract RWAVault is Ownable, ReentrancyGuard {
         }
         yieldToken.burn(msg.sender, shares);
         usdc.safeTransfer(msg.sender, amountOut);
-        emit Withdraw(msg.sender, shares, amountOut);
+        emit Withdrawn(msg.sender, shares, amountOut);
+    }
+
+    /**
+     * @notice Withdraws USDC from the vault to invest in RWA.
+     * @dev Only callable by the vault owner.
+     * @param amount USDC amount to withdraw.
+     */
+    function withdrawForInvestment(uint256 amount) external onlyOwner nonReentrant {
+        if (amount == 0) {
+            revert AmountZero();
+        }
+        uint256 available = totalUSDC();
+        if (amount > available) {
+            revert InsufficientUSDC(amount, available);
+        }
+        usdc.safeTransfer(treasury, amount);
+    }
+
+    /**
+     * @notice Deposits yield into the vault and routes a fee to the treasury.
+     * @dev Caller must approve the vault for `amount`.
+     * @param amount Gross USDC yield amount.
+     */
+    function depositYield(uint256 amount) external nonReentrant {
+        if (amount == 0) {
+            revert AmountZero();
+        }
+        usdc.safeTransferFrom(msg.sender, address(this), amount);
+        uint256 fee = (amount * FEE_BPS) / BPS_DENOMINATOR;
+        if (fee > 0) {
+            usdc.safeTransfer(treasury, fee);
+        }
+        uint256 netAmount = amount - fee;
+        emit YieldDistributed(amount, fee, netAmount);
     }
 
     /**
