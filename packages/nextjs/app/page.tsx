@@ -1,6 +1,8 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import type { NextPage } from "next";
 import { useAccount } from "wagmi";
 import { useTargetNetwork } from "~~/hooks/scaffold-eth";
@@ -8,6 +10,24 @@ import { useTargetNetwork } from "~~/hooks/scaffold-eth";
 const Home: NextPage = () => {
   const { address: connectedAddress } = useAccount();
   const { targetNetwork } = useTargetNetwork();
+  const router = useRouter();
+  const [isRedirecting, setIsRedirecting] = useState(true);
+
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      router.push("/deposit");
+    }, 1000);
+
+    return () => clearTimeout(timeout);
+  }, [router]);
+
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      setIsRedirecting(false);
+    }, 1200);
+
+    return () => clearTimeout(timeout);
+  }, []);
 
   return (
     <>
@@ -20,6 +40,7 @@ const Home: NextPage = () => {
                 Earn RWA-backed yield on USDC across chains. Deposit once, mint yRWA on Arc Testnet, and let your
                 capital work.
               </p>
+              {isRedirecting && <div className="mb-4 text-sm opacity-70">Redirecting to Deposit...</div>}
               <div className="flex flex-wrap justify-center gap-3">
                 <Link href="/deposit" className="btn btn-primary">
                   Deposit USDC

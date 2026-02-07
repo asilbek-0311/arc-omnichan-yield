@@ -7,9 +7,10 @@ export type DepositHistoryEntry = {
   address: Address;
   deposits: ChainDepositState[];
   vaultDeposit?: {
-    txHash: Hex;
+    txHash?: Hex | null;
     amount: bigint;
-    status: "pending" | "completed" | "failed";
+    status: "switching" | "approving" | "depositing" | "pending" | "completed" | "failed";
+    error?: string;
   };
 };
 
@@ -82,7 +83,21 @@ export const useDepositHistory = (address?: Address) => {
     [address, history],
   );
 
-  return { history, saveDeposit };
+  const updateDeposit = useCallback(
+    (timestamp: number, updates: Partial<DepositHistoryEntry>) => {
+      if (!address) return;
+      const updated = history.map(entry => (entry.timestamp === timestamp ? { ...entry, ...updates } : entry));
+      setHistory(updated);
+      try {
+        localStorage.setItem(`deposit-history-${address}`, JSON.stringify(updated, replaceBigInts));
+      } catch (err) {
+        console.error("Failed to update deposit history:", err);
+      }
+    },
+    [address, history],
+  );
+
+  return { history, saveDeposit, updateDeposit };
 };
 
 /**

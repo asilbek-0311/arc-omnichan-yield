@@ -23,7 +23,7 @@ const getExplorerUrl = (chainId: number, txHash: string) => {
     43113: "https://testnet.snowtrace.io/tx/",
     84532: "https://sepolia.basescan.org/tx/",
     421614: "https://sepolia.arbiscan.io/tx/",
-    5042002: "https://testnet.arcscan.xyz/tx/",
+    5042002: "https://testnet.arcscan.app/tx/",
   };
   return explorers[chainId] ? `${explorers[chainId]}${txHash}` : null;
 };

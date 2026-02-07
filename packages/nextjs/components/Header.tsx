@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useRef } from "react";
-import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { hardhat } from "viem/chains";
@@ -17,13 +16,28 @@ type HeaderMenuLink = {
 
 export const menuLinks: HeaderMenuLink[] = [
   {
-    label: "Home",
-    href: "/",
+    label: "Deposit",
+    href: "/deposit",
+  },
+  {
+    label: "View Vault",
+    href: "/vault",
   },
   {
     label: "Debug Contracts",
     href: "/debug",
     icon: <BugAntIcon className="h-4 w-4" />,
+  },
+];
+
+const primaryLinks: HeaderMenuLink[] = [
+  {
+    label: "Deposit",
+    href: "/deposit",
+  },
+  {
+    label: "View Vault",
+    href: "/vault",
   },
 ];
 
@@ -59,6 +73,7 @@ export const HeaderMenuLinks = () => {
 export const Header = () => {
   const { targetNetwork } = useTargetNetwork();
   const isLocalNetwork = targetNetwork.id === hardhat.id;
+  const pathname = usePathname();
 
   const burgerMenuRef = useRef<HTMLDetailsElement>(null);
   useOutsideClick(burgerMenuRef, () => {
@@ -66,38 +81,54 @@ export const Header = () => {
   });
 
   return (
-    <div className="sticky lg:static top-0 navbar bg-base-100 min-h-0 shrink-0 justify-between z-20 shadow-md shadow-secondary px-0 sm:px-2">
-      <div className="navbar-start w-auto lg:w-1/2">
-        <details className="dropdown" ref={burgerMenuRef}>
-          <summary className="ml-1 btn btn-ghost lg:hidden hover:bg-transparent">
-            <Bars3Icon className="h-1/2" />
-          </summary>
-          <ul
-            className="menu menu-compact dropdown-content mt-3 p-2 shadow-sm bg-base-100 rounded-box w-52"
-            onClick={() => {
-              burgerMenuRef?.current?.removeAttribute("open");
-            }}
-          >
-            <HeaderMenuLinks />
-          </ul>
-        </details>
-        <Link href="/" passHref className="hidden lg:flex items-center gap-2 ml-4 mr-6 shrink-0">
-          <div className="flex relative w-10 h-10">
-            <Image alt="SE2 logo" className="cursor-pointer" fill src="/logo.svg" />
+    <>
+      <div className="sticky lg:static top-0 navbar bg-base-100 min-h-0 shrink-0 justify-between z-20 shadow-md shadow-secondary px-0 sm:px-2">
+        <div className="navbar-start w-auto">
+          <details className="dropdown" ref={burgerMenuRef}>
+            <summary className="ml-1 btn btn-ghost lg:hidden hover:bg-transparent">
+              <Bars3Icon className="h-1/2" />
+            </summary>
+            <ul
+              className="menu menu-compact dropdown-content mt-3 p-2 shadow-sm bg-base-100 rounded-box w-52"
+              onClick={() => {
+                burgerMenuRef?.current?.removeAttribute("open");
+              }}
+            >
+              <HeaderMenuLinks />
+            </ul>
+          </details>
+        </div>
+        <div className="navbar-center hidden lg:flex">
+          <div className="flex items-center gap-3">
+            {primaryLinks.map(link => (
+              <Link
+                key={link.href}
+                href={link.href}
+                className={`btn btn-lg ${pathname === link.href ? "btn-primary" : "btn-outline"}`}
+              >
+                {link.label}
+              </Link>
+            ))}
           </div>
-          <div className="flex flex-col">
-            <span className="font-bold leading-tight">Scaffold-ETH</span>
-            <span className="text-xs">Ethereum dev stack</span>
-          </div>
-        </Link>
-        <ul className="hidden lg:flex lg:flex-nowrap menu menu-horizontal px-1 gap-2">
-          <HeaderMenuLinks />
-        </ul>
+        </div>
+        <div className="navbar-end grow mr-4">
+          <RainbowKitCustomConnectButton />
+          {isLocalNetwork && <FaucetButton />}
+        </div>
       </div>
-      <div className="navbar-end grow mr-4">
-        <RainbowKitCustomConnectButton />
-        {isLocalNetwork && <FaucetButton />}
+      <div className="lg:hidden px-4 pb-3">
+        <div className="grid grid-cols-2 gap-3">
+          {primaryLinks.map(link => (
+            <Link
+              key={link.href}
+              href={link.href}
+              className={`btn btn-lg w-full ${pathname === link.href ? "btn-primary" : "btn-outline"}`}
+            >
+              {link.label}
+            </Link>
+          ))}
+        </div>
       </div>
-    </div>
+    </>
   );
 };

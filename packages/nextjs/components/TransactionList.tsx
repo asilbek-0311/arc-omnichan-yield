@@ -12,7 +12,7 @@ const CHAIN_INFO: Record<number, { name: string; explorer: string }> = {
   421614: { name: "Arbitrum Sepolia", explorer: "https://sepolia.arbiscan.io" },
   84532: { name: "Base Sepolia", explorer: "https://sepolia.basescan.org" },
   43113: { name: "Avalanche Fuji", explorer: "https://testnet.snowtrace.io" },
-  5042002: { name: "Arc Testnet", explorer: "https://testnet.arcscan.io" },
+  5042002: { name: "Arc Testnet", explorer: "https://testnet.arcscan.app" },
 };
 
 export const TransactionList = ({ transactions }: TransactionListProps) => {
