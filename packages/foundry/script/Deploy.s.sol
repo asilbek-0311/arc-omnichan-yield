@@ -2,7 +2,6 @@
 pragma solidity ^0.8.19;
 
 import "./DeployHelpers.s.sol";
-import { DeployYourContract } from "./DeployYourContract.s.sol";
 import { RWAVault } from "../contracts/RWAVault.sol";
 
 /**
@@ -19,11 +18,8 @@ contract DeployScript is ScaffoldETHDeploy {
         address treasuryAddress = vm.envAddress("TREASURY_ADDRESS");
         new RWAVault(usdcAddress, deployer, treasuryAddress);
 
-        // Optional: keep scaffold example deployment
-        // DeployYourContract deployYourContract = new DeployYourContract();
-        // deployYourContract.run();
-
-        // Deploy another contract
+        // Deploy additional contracts here
+        // Example:
         // DeployMyContract myContract = new DeployMyContract();
         // myContract.run();
     }

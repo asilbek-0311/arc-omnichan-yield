@@ -6,6 +6,7 @@ export const GATEWAY_CONFIG = {
   apiUrl: process.env.NEXT_PUBLIC_GATEWAY_API_URL!,
   destinationChainId: Number(process.env.NEXT_PUBLIC_DESTINATION_CHAIN_ID),
   destinationUsdc: process.env.NEXT_PUBLIC_USDC_ARC_TESTNET as `${string}`,
+  zapReceiverAddress: process.env.NEXT_PUBLIC_ZAP_RECEIVER_ADDRESS as `${string}`,
   usdc: {
     sepolia: process.env.NEXT_PUBLIC_USDC_SEPOLIA as `${string}`,
     avalancheFuji: process.env.NEXT_PUBLIC_USDC_AVAX_FUJI as `${string}`,
@@ -17,6 +18,7 @@ export const GATEWAY_CONFIG = {
     avalancheFuji: 1,
     baseSepolia: 6,
     arbitrumSepolia: 3,
+    arcTestnet: 5, // Arc testnet domain ID - verify with Circle Gateway docs
   },
   chainIds: {
     sepolia: 11155111,

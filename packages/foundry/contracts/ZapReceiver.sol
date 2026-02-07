@@ -9,7 +9,7 @@ import { RWAVault } from "./RWAVault.sol";
 
 /**
  * @title ZapReceiver
- * @notice Receives USDC from cross-chain bridges (LiFi, Circle Gateway) and automatically deposits to RWAVault
+ * @notice Receives USDC from cross-chain bridges (Circle Gateway) and automatically deposits to RWAVault
  * @dev Implements recovery mechanism if vault deposit fails
  */
 contract ZapReceiver is Ownable, ReentrancyGuard {
@@ -19,6 +19,7 @@ contract ZapReceiver is Ownable, ReentrancyGuard {
     error RecipientZero();
     error OnlyUSDC();
     error InsufficientPendingDeposits(uint256 requested, uint256 available);
+    error InsufficientBalance(uint256 requested, uint256 available);
 
     /// @notice Emitted when USDC is received and successfully deposited to vault
     event ZapCompleted(address indexed recipient, uint256 usdcAmount, uint256 sharesMinted);
@@ -50,8 +51,46 @@ contract ZapReceiver is Ownable, ReentrancyGuard {
     }
 
     /**
-     * @notice Receives USDC and automatically deposits to vault
-     * @dev Called by bridges/LiFi when USDC arrives. If vault deposit fails, funds are stored for manual claim
+     * @notice Process bridged USDC and deposit to vault
+     * @dev Called by user after Circle Gateway bridges USDC to this contract
+     * @param recipient The user who will receive yRWA shares
+     * @param amount Amount of USDC to process (must be <= contract's USDC balance)
+     * @return success Whether the operation succeeded
+     */
+    function processBridgedDeposit(address recipient, uint256 amount) external nonReentrant returns (bool success) {
+        if (amount == 0) {
+            revert AmountZero();
+        }
+        if (recipient == address(0)) {
+            revert RecipientZero();
+        }
+
+        // Check contract has enough USDC (from Circle Gateway bridge)
+        uint256 balance = usdc.balanceOf(address(this));
+        if (amount > balance) {
+            revert InsufficientBalance(amount, balance);
+        }
+
+        // Try to deposit to vault
+        try this._depositToVault(recipient, amount) returns (uint256 shares) {
+            emit ZapCompleted(recipient, amount, shares);
+            return true;
+        } catch Error(string memory reason) {
+            // Vault deposit failed - store for manual claim
+            pendingDeposits[recipient] += amount;
+            emit ZapFailed(recipient, amount, reason);
+            return false;
+        } catch {
+            // Unknown error - store for manual claim
+            pendingDeposits[recipient] += amount;
+            emit ZapFailed(recipient, amount, "Unknown error");
+            return false;
+        }
+    }
+
+    /**
+     * @notice Receives USDC and automatically deposits to vault (legacy function for direct transfers)
+     * @dev Called by bridges/LiFi when USDC arrives via transferFrom. If vault deposit fails, funds are stored for manual claim
      * @param recipient The user who will receive yRWA shares
      * @param amount Amount of USDC received
      * @return success Whether the operation succeeded

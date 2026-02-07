@@ -36,10 +36,16 @@ const STEPS: Step[] = [
     statuses: ["bridging"],
   },
   {
+    key: "claim",
+    label: "Ready to claim on Arc",
+    icon: "👆",
+    statuses: ["awaiting_claim"],
+  },
+  {
     key: "vault",
     label: "Depositing to vault",
     icon: "🏦",
-    statuses: ["depositing_vault"],
+    statuses: ["claiming", "depositing_vault"],
   },
   {
     key: "done",

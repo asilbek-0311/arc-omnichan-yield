@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { TransactionList } from "./TransactionList";
 import { ZapProgress } from "./ZapProgress";
 import { type Address, formatUnits } from "viem";
 import { useAccount } from "wagmi";
@@ -22,7 +23,7 @@ const CHAIN_OPTIONS: ChainOption[] = [
 
 export const OneClickZap = () => {
   const { isConnected } = useAccount();
-  const { state, getQuote, executeZap, reset } = useZapDeposit();
+  const { state, getQuote, executeZap, claimAndDeposit, reset } = useZapDeposit();
 
   const [sourceChain, setSourceChain] = useState<SupportedChainKey>("sepolia");
   const [amount, setAmount] = useState("");
@@ -175,7 +176,24 @@ export const OneClickZap = () => {
             {/* Progress Indicator */}
             <ZapProgress state={state} />
 
+            {/* Transaction History */}
+            <TransactionList transactions={state.transactions} />
+
             {/* Actions */}
+            {state.status === "awaiting_claim" && quote && (
+              <div className="card-actions justify-end mt-4">
+                <div className="alert alert-warning mb-4">
+                  <span>
+                    Your USDC has arrived on Arc! Click below to claim and deposit it to the vault to receive yRWA
+                    tokens.
+                  </span>
+                </div>
+                <button className="btn btn-primary btn-lg w-full" onClick={() => claimAndDeposit(quote.estimatedUSDC)}>
+                  Claim & Deposit to Vault
+                </button>
+              </div>
+            )}
+
             {(state.status === "completed" || state.status === "failed") && (
               <div className="card-actions justify-end mt-4">
                 <button className="btn btn-primary" onClick={handleReset}>
@@ -193,7 +211,7 @@ export const OneClickZap = () => {
           <ol className="list-decimal list-inside space-y-1">
             <li>Deposit USDC to Circle Gateway on your selected chain</li>
             <li>Circle Gateway bridges USDC to Arc (5-10 minutes)</li>
-            <li>ZapReceiver automatically deposits to RWAVault on Arc</li>
+            <li>Click &quot;Claim &amp; Deposit&quot; to process the bridged USDC</li>
             <li>You receive yRWA tokens representing your vault share</li>
           </ol>
         </div>

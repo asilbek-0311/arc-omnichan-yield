@@ -27,6 +27,8 @@ export type ZapStatus =
   | "approving_gateway" // Approving USDC for Gateway
   | "depositing_gateway" // Depositing to Circle Gateway
   | "bridging" // Waiting for Circle Gateway bridge
+  | "awaiting_claim" // USDC arrived on Arc, needs manual claim
+  | "claiming" // Claiming and depositing to vault
   | "depositing_vault" // ZapReceiver depositing to vault on Arc
   | "completed"
   | "failed";
@@ -42,13 +44,21 @@ export type ZapQuote = {
   needsSwap: boolean;
 };
 
+export type TransactionRecord = {
+  hash: Hex;
+  chainId: number;
+  step: string; // e.g., "Swap Approval", "Gateway Deposit", "Claim"
+  timestamp: number;
+};
+
 export type ZapState = {
   status: ZapStatus;
   quote: ZapQuote | null;
   progress: number; // 0-100
   currentStep: string;
-  txHash: Hex | null;
+  txHash: Hex | null; // Current/most recent transaction
   txChainId: number | null; // Chain ID where txHash was submitted
+  transactions: TransactionRecord[]; // All transactions in this zap
   error: string | null;
 };
 
@@ -57,6 +67,7 @@ const chainMap = {
   avalancheFuji: chains.avalancheFuji,
   baseSepolia: chains.baseSepolia,
   arbitrumSepolia: chains.arbitrumSepolia,
+  arcTestnet: chains.arcTestnet,
 } as const;
 
 const getPublicClient = (chainKey: SupportedChainKey) => {
@@ -110,6 +121,18 @@ const gatewayWalletAbi = [
     outputs: [],
     stateMutability: "nonpayable",
   },
+  {
+    type: "function",
+    name: "depositForBurn",
+    inputs: [
+      { name: "amount", type: "uint256" },
+      { name: "destinationDomain", type: "uint32" },
+      { name: "mintRecipient", type: "bytes32" },
+      { name: "burnToken", type: "address" },
+    ],
+    outputs: [{ name: "nonce", type: "uint64" }],
+    stateMutability: "nonpayable",
+  },
 ] as const;
 
 export const useZapDeposit = () => {
@@ -125,6 +148,7 @@ export const useZapDeposit = () => {
     currentStep: "",
     txHash: null,
     txChainId: null,
+    transactions: [],
     error: null,
   });
 
@@ -267,12 +291,31 @@ export const useZapDeposit = () => {
             functionName: "approve",
             args: [approvalAddress, MAX_UINT256],
             account: address,
+            gas: 100000n, // Set reasonable gas limit for approval
           });
 
-          await getPublicClient(quote.sourceChain).waitForTransactionReceipt({
+          // Add to transaction history
+          setState(prev => ({
+            ...prev,
+            transactions: [
+              ...prev.transactions,
+              {
+                hash: approveHash,
+                chainId: chainMap[quote.sourceChain as keyof typeof chainMap].id,
+                step: "Token Approval for Swap",
+                timestamp: Date.now(),
+              },
+            ],
+          }));
+
+          const swapApproveReceipt = await getPublicClient(quote.sourceChain).waitForTransactionReceipt({
             hash: approveHash,
             timeout: 60_000,
           });
+
+          if (swapApproveReceipt.status === "reverted") {
+            throw new Error("Token approval for swap failed. Please try again.");
+          }
 
           setState(prev => ({ ...prev, status: "swapping", progress: 35, currentStep: "Swapping to USDC..." }));
 
@@ -294,22 +337,43 @@ export const useZapDeposit = () => {
         }));
 
         const usdcAddress = GATEWAY_CONFIG.usdc[quote.sourceChain as GatewayChainKey] as Address;
-        const gatewayAddress = GATEWAY_CONFIG.gatewayWallet as Address;
+        // IMPORTANT: Approve the TokenMinter contract (not GatewayWallet)
+        // because depositForBurn is called on TokenMinter
+        const tokenMinterAddress = GATEWAY_CONFIG.gatewayMinter as Address;
 
         const approveHash = await walletClient.writeContract({
           address: usdcAddress,
           abi: erc20Abi,
           functionName: "approve",
-          args: [gatewayAddress, MAX_UINT256],
+          args: [tokenMinterAddress, MAX_UINT256],
           account: address,
+          gas: 100000n, // Set reasonable gas limit for approval
         });
 
-        await getPublicClient(quote.sourceChain).waitForTransactionReceipt({
+        // Add to transaction history
+        setState(prev => ({
+          ...prev,
+          transactions: [
+            ...prev.transactions,
+            {
+              hash: approveHash,
+              chainId: chainMap[quote.sourceChain as keyof typeof chainMap].id,
+              step: "USDC Approval for Gateway",
+              timestamp: Date.now(),
+            },
+          ],
+        }));
+
+        const approveReceipt = await getPublicClient(quote.sourceChain).waitForTransactionReceipt({
           hash: approveHash,
           timeout: 60_000,
         });
 
-        // Step 4: Deposit to Circle Gateway
+        if (approveReceipt.status === "reverted") {
+          throw new Error("USDC approval transaction failed. Please try again.");
+        }
+
+        // Step 4: Deposit to Circle Gateway with ZapReceiver as recipient
         setState(prev => ({
           ...prev,
           status: "depositing_gateway",
@@ -317,18 +381,36 @@ export const useZapDeposit = () => {
           currentStep: "Depositing to Gateway...",
         }));
 
+        // Get ZapReceiver address from config and convert to bytes32 for Circle Gateway
+        const zapReceiverAddress = GATEWAY_CONFIG.zapReceiverAddress as Address;
+        // Remove '0x' prefix, pad to 32 bytes, add back '0x' prefix
+        const mintRecipient = `0x${zapReceiverAddress.slice(2).padStart(64, "0")}` as `0x${string}`;
+
+        // Get destination domain for Arc testnet from config
+        const destinationDomain = GATEWAY_CONFIG.domains.arcTestnet;
+
         const depositHash = await walletClient.writeContract({
-          address: gatewayAddress,
+          address: GATEWAY_CONFIG.gatewayMinter as Address, // Use TokenMinter for depositForBurn
           abi: gatewayWalletAbi,
-          functionName: "deposit",
-          args: [usdcAddress, usdcAmount],
+          functionName: "depositForBurn",
+          args: [usdcAmount, destinationDomain, mintRecipient, usdcAddress],
           account: address,
+          gas: 500000n, // Manually set gas limit to avoid exceeding network cap
         });
 
         setState(prev => ({
           ...prev,
           txHash: depositHash,
           txChainId: chainMap[quote.sourceChain as keyof typeof chainMap].id,
+          transactions: [
+            ...prev.transactions,
+            {
+              hash: depositHash,
+              chainId: chainMap[quote.sourceChain as keyof typeof chainMap].id,
+              step: "Circle Gateway Deposit",
+              timestamp: Date.now(),
+            },
+          ],
         }));
 
         // Update history with tx hash
@@ -336,10 +418,16 @@ export const useZapDeposit = () => {
           updateZap(currentZapTimestamp, { txHash: depositHash });
         }
 
-        await getPublicClient(quote.sourceChain).waitForTransactionReceipt({
+        // Wait for transaction and check if it succeeded
+        const receipt = await getPublicClient(quote.sourceChain).waitForTransactionReceipt({
           hash: depositHash,
           timeout: 60_000,
         });
+
+        // Check if transaction was successful
+        if (receipt.status === "reverted") {
+          throw new Error("Gateway deposit transaction failed. Please check the transaction on the block explorer.");
+        }
 
         // Step 5: Wait for Circle Gateway bridge (passive)
         setState(prev => ({
@@ -352,25 +440,17 @@ export const useZapDeposit = () => {
         }));
 
         notification.success(
-          "Deposit submitted to Gateway! Your USDC will arrive on Arc in 5-10 minutes and automatically deposit to the vault.",
+          "Deposit submitted to Gateway! Your USDC will arrive on Arc in 5-10 minutes. You'll need to claim it to receive yRWA.",
         );
 
-        // In production, poll for Arc balance or listen for ZapReceiver event
-        // For now, mark as completed after gateway deposit
-        setTimeout(() => {
-          setState(prev => ({
-            ...prev,
-            status: "completed",
-            progress: 100,
-            currentStep: "Zap completed! Check Arc for yRWA tokens.",
-          }));
-          notification.success("Zap completed! Your yRWA should appear shortly.");
-
-          // Update history as completed
-          if (currentZapTimestamp) {
-            updateZap(currentZapTimestamp, { status: "completed" });
-          }
-        }, 2000);
+        // After bridge completes (user needs to manually trigger claim)
+        // Move to awaiting claim state
+        setState(prev => ({
+          ...prev,
+          status: "awaiting_claim",
+          progress: 85,
+          currentStep: "USDC arrived on Arc! Click 'Claim & Deposit' to receive yRWA.",
+        }));
       } catch (error) {
         const message = error instanceof Error ? error.message : "Zap failed";
         setState(prev => ({
@@ -392,6 +472,111 @@ export const useZapDeposit = () => {
   );
 
   /**
+   * Claim bridged USDC and deposit to vault on Arc
+   */
+  const claimAndDeposit = useCallback(
+    async (amount: bigint) => {
+      if (!address || !walletClient) {
+        notification.error("Connect your wallet to continue");
+        return;
+      }
+
+      try {
+        setState(prev => ({ ...prev, status: "claiming", progress: 90, currentStep: "Switching to Arc..." }));
+
+        // Switch to Arc testnet and wait for it to complete
+        await switchChainAsync({ chainId: GATEWAY_CONFIG.destinationChainId });
+
+        // Add small delay to ensure wallet client has updated
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        setState(prev => ({ ...prev, currentStep: "Claiming and depositing USDC..." }));
+
+        // Call ZapReceiver.processBridgedDeposit()
+        const zapReceiverAbi = [
+          {
+            type: "function",
+            name: "processBridgedDeposit",
+            inputs: [
+              { name: "recipient", type: "address" },
+              { name: "amount", type: "uint256" },
+            ],
+            outputs: [{ name: "success", type: "bool" }],
+            stateMutability: "nonpayable",
+          },
+        ] as const;
+
+        const claimHash = await walletClient.writeContract({
+          address: GATEWAY_CONFIG.zapReceiverAddress as Address,
+          abi: zapReceiverAbi,
+          functionName: "processBridgedDeposit",
+          args: [address, amount],
+          account: address,
+          chain: chains.arcTestnet, // Explicitly specify the chain
+          gas: 500000n, // Set reasonable gas limit for claim transaction
+        });
+
+        setState(prev => ({
+          ...prev,
+          status: "depositing_vault",
+          progress: 95,
+          currentStep: "Depositing to vault...",
+          txHash: claimHash,
+          txChainId: chains.arcTestnet.id,
+          transactions: [
+            ...prev.transactions,
+            {
+              hash: claimHash,
+              chainId: chains.arcTestnet.id,
+              step: "Claim & Deposit to Vault",
+              timestamp: Date.now(),
+            },
+          ],
+        }));
+
+        // Wait for transaction
+        await createPublicClient({
+          chain: chains.arcTestnet,
+          transport: http(),
+        }).waitForTransactionReceipt({
+          hash: claimHash,
+          timeout: 60_000,
+        });
+
+        // Mark as completed
+        setState(prev => ({
+          ...prev,
+          status: "completed",
+          progress: 100,
+          currentStep: "Zap completed! yRWA tokens received.",
+        }));
+        notification.success("Successfully claimed and deposited! Check your yRWA balance.");
+
+        // Update history as completed
+        if (currentZapTimestamp) {
+          updateZap(currentZapTimestamp, { status: "completed" });
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Claim failed";
+        setState(prev => ({
+          ...prev,
+          status: "failed",
+          error: message,
+          progress: 0,
+          currentStep: "Failed",
+        }));
+        notification.error(message);
+
+        // Update history as failed
+        if (currentZapTimestamp) {
+          updateZap(currentZapTimestamp, { status: "failed", error: message });
+        }
+      }
+    },
+    [address, walletClient, switchChainAsync, updateZap, currentZapTimestamp],
+  );
+
+  /**
    * Reset state
    */
   const reset = useCallback(() => {
@@ -402,6 +587,7 @@ export const useZapDeposit = () => {
       currentStep: "",
       txHash: null,
       txChainId: null,
+      transactions: [],
       error: null,
     });
   }, []);
@@ -410,6 +596,7 @@ export const useZapDeposit = () => {
     state,
     getQuote,
     executeZap,
+    claimAndDeposit,
     reset,
   };
 };
