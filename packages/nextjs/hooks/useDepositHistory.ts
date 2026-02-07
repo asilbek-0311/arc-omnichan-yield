@@ -13,6 +13,20 @@ export type DepositHistoryEntry = {
   };
 };
 
+export type ZapHistoryEntry = {
+  timestamp: number;
+  address: Address;
+  sourceChain: string;
+  sourceChainId: number;
+  sourceToken: Address;
+  sourceAmount: bigint;
+  estimatedYRWA: bigint;
+  txHash: Hex | null;
+  status: "pending" | "completed" | "failed";
+  error?: string;
+  needsSwap: boolean;
+};
+
 // BigInt serialization helpers
 const replaceBigInts = (key: string, value: any) => {
   if (typeof value === "bigint") {
@@ -69,4 +83,58 @@ export const useDepositHistory = (address?: Address) => {
   );
 
   return { history, saveDeposit };
+};
+
+/**
+ * Hook for tracking zap deposit history
+ */
+export const useZapHistory = (address?: Address) => {
+  const [zapHistory, setZapHistory] = useState<ZapHistoryEntry[]>([]);
+
+  // Load from localStorage on mount
+  useEffect(() => {
+    if (!address) return;
+    const key = `zap-history-${address}`;
+    const stored = localStorage.getItem(key);
+    if (stored) {
+      try {
+        setZapHistory(JSON.parse(stored, reviveBigInts));
+      } catch (err) {
+        console.error("Failed to load zap history:", err);
+        setZapHistory([]);
+      }
+    }
+  }, [address]);
+
+  // Save zap entry
+  const saveZap = useCallback(
+    (entry: ZapHistoryEntry) => {
+      if (!address) return;
+      const updated = [entry, ...zapHistory].slice(0, 50); // Keep last 50 zaps
+      setZapHistory(updated);
+      try {
+        localStorage.setItem(`zap-history-${address}`, JSON.stringify(updated, replaceBigInts));
+      } catch (err) {
+        console.error("Failed to save zap history:", err);
+      }
+    },
+    [address, zapHistory],
+  );
+
+  // Update existing zap entry
+  const updateZap = useCallback(
+    (timestamp: number, updates: Partial<ZapHistoryEntry>) => {
+      if (!address) return;
+      const updated = zapHistory.map(entry => (entry.timestamp === timestamp ? { ...entry, ...updates } : entry));
+      setZapHistory(updated);
+      try {
+        localStorage.setItem(`zap-history-${address}`, JSON.stringify(updated, replaceBigInts));
+      } catch (err) {
+        console.error("Failed to update zap history:", err);
+      }
+    },
+    [address, zapHistory],
+  );
+
+  return { zapHistory, saveZap, updateZap };
 };

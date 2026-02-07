@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { formatUnits, parseUnits } from "viem";
 import { useAccount, useReadContract } from "wagmi";
 import { useScaffoldReadContract, useScaffoldWriteContract } from "~~/hooks/scaffold-eth";
+import { useZapRecovery } from "~~/hooks/useZapRecovery";
 import {
   calculateMaxWithdrawable,
   calculateUSDCValue,
@@ -25,6 +26,9 @@ const erc20BalanceAbi = [
 export const VaultDashboard = () => {
   const { address } = useAccount();
   const [withdrawAmount, setWithdrawAmount] = useState("");
+
+  // Check for pending zap deposits that failed
+  const { pendingAmount, hasPending, isRecovering, retryDeposit } = useZapRecovery();
   const { data: sharePrice } = useScaffoldReadContract({
     contractName: "RWAVault",
     functionName: "sharePrice",
@@ -99,6 +103,45 @@ export const VaultDashboard = () => {
 
   return (
     <div className="space-y-6">
+      {/* Recovery UI for failed zap deposits */}
+      {hasPending && (
+        <div className="alert alert-warning shadow-lg">
+          <div className="flex flex-col gap-2 w-full">
+            <div className="flex items-center gap-2">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="stroke-current flex-shrink-0 h-6 w-6"
+                fill="none"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                />
+              </svg>
+              <div>
+                <h3 className="font-bold">Pending Deposit Recovery</h3>
+                <div className="text-sm">
+                  You have <span className="font-semibold">{formatUnits(pendingAmount, 6)} USDC</span> waiting to be
+                  deposited to the vault. The automatic deposit failed, but your funds are safe.
+                </div>
+              </div>
+            </div>
+            <div className="flex justify-end">
+              <button
+                className={`btn btn-sm btn-warning ${isRecovering ? "loading" : ""}`}
+                onClick={retryDeposit}
+                disabled={isRecovering}
+              >
+                {isRecovering ? "Retrying..." : "Retry Deposit"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="card bg-base-100 shadow-xl">
         <div className="card-body">
           <h2 className="card-title">Your Position</h2>
