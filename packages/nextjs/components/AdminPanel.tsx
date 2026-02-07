@@ -4,7 +4,9 @@ import { useMemo, useState } from "react";
 import { formatUnits, parseUnits } from "viem";
 import { useAccount, useWriteContract } from "wagmi";
 import { useDeployedContractInfo, useScaffoldReadContract } from "~~/hooks/scaffold-eth";
+import { useUscyTreasury } from "~~/hooks/useUscyTreasury";
 import { GATEWAY_CONFIG } from "~~/lib/gateway-config";
+import { USYC_CONFIG } from "~~/lib/usyc-config";
 
 const erc20ApproveAbi = [
   {
@@ -24,6 +26,8 @@ export const AdminPanel = () => {
   const [investAmount, setInvestAmount] = useState("");
   const [yieldAmount, setYieldAmount] = useState("");
   const [rwaValue, setRwaValue] = useState("");
+  const [usycDepositAmount, setUscyDepositAmount] = useState("");
+  const [usycRedeemAmount, setUscyRedeemAmount] = useState("");
 
   const { data: owner } = useScaffoldReadContract({
     contractName: "RWAVault",
@@ -39,10 +43,21 @@ export const AdminPanel = () => {
   });
   const { data: vaultInfo } = useDeployedContractInfo({ contractName: "RWAVault" });
 
+  const allowlist = useMemo(
+    () =>
+      (process.env.NEXT_PUBLIC_ADMIN_ALLOWLIST || "")
+        .split(",")
+        .map(item => item.trim().toLowerCase())
+        .filter(Boolean),
+    [],
+  );
   const isOwner = owner && address && owner.toLowerCase() === address.toLowerCase();
+  const isAllowlisted = address ? allowlist.includes(address.toLowerCase()) : false;
+  const canViewAdmin = Boolean(isOwner || isAllowlisted);
 
   const { writeContractAsync: writeVaultAsync, isPending } = useWriteContract();
   const { writeContractAsync: approveAsync } = useWriteContract();
+  const usycTreasury = useUscyTreasury();
 
   const vaultWriteAbi = [
     {
@@ -127,7 +142,7 @@ export const AdminPanel = () => {
     [totalRWAValue],
   );
 
-  if (!isOwner) {
+  if (!canViewAdmin) {
     return (
       <div className="card bg-base-100 shadow-xl">
         <div className="card-body">
@@ -140,6 +155,15 @@ export const AdminPanel = () => {
 
   return (
     <div className="space-y-6">
+      {!isOwner && (
+        <div className="alert alert-warning">
+          <div>
+            <div className="font-semibold">View-only access</div>
+            <div className="text-sm">Owner wallet required to run admin transactions.</div>
+          </div>
+        </div>
+      )}
+
       <div className="card bg-base-100 shadow-xl">
         <div className="card-body">
           <h2 className="card-title">Vault Stats</h2>
@@ -153,6 +177,170 @@ export const AdminPanel = () => {
               <div className="text-xl font-semibold">{formattedRWA}</div>
             </div>
           </div>
+        </div>
+      </div>
+
+      <div className="card bg-base-100 shadow-xl">
+        <div className="card-body">
+          <h2 className="card-title">USYC Treasury</h2>
+          <p className="text-sm opacity-70 mb-4">
+            Manage USYC subscriptions and redemptions on Arc testnet. Wallet must be allowlisted.
+          </p>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="rounded-xl bg-base-200 p-4">
+              <div className="text-sm opacity-70">Arc USDC Balance</div>
+              <div className="text-xl font-semibold">{usycTreasury.formattedUsdc}</div>
+            </div>
+            <div className="rounded-xl bg-base-200 p-4">
+              <div className="text-sm opacity-70">USYC Balance</div>
+              <div className="text-xl font-semibold">{usycTreasury.formattedUscy}</div>
+            </div>
+          </div>
+
+          <div className="grid gap-6 mt-6 md:grid-cols-2">
+            <div className="space-y-2">
+              <h3 className="text-sm font-semibold">Subscribe (USDC → USYC)</h3>
+              <div className="form-control">
+                <label className="label">
+                  <span className="label-text">USDC Amount</span>
+                  <span className="label-text-alt">Available: {usycTreasury.formattedUsdc}</span>
+                </label>
+                <input
+                  type="number"
+                  className="input input-bordered"
+                  value={usycDepositAmount}
+                  onChange={e => setUscyDepositAmount(e.target.value)}
+                  placeholder="Enter amount"
+                  step="0.01"
+                  min="0"
+                />
+              </div>
+              <button
+                className="btn btn-primary w-full"
+                onClick={() => usycTreasury.deposit(usycDepositAmount)}
+                disabled={
+                  !usycDepositAmount ||
+                  Number(usycDepositAmount) <= 0 ||
+                  ["approving", "depositing", "redeeming", "switching"].includes(usycTreasury.status) ||
+                  !isOwner
+                }
+              >
+                {usycTreasury.status === "approving" && "Approving..."}
+                {usycTreasury.status === "depositing" && "Depositing..."}
+                {usycTreasury.status === "switching" && "Switching Network..."}
+                {usycTreasury.status === "idle" && "Approve & Deposit"}
+                {usycTreasury.status === "completed" && "Deposit Complete"}
+                {usycTreasury.status === "error" && "Try Again"}
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              <h3 className="text-sm font-semibold">Redeem (USYC → USDC)</h3>
+              <div className="form-control">
+                <label className="label">
+                  <span className="label-text">USYC Amount</span>
+                  <span className="label-text-alt">Available: {usycTreasury.formattedUscy}</span>
+                </label>
+                <input
+                  type="number"
+                  className="input input-bordered"
+                  value={usycRedeemAmount}
+                  onChange={e => setUscyRedeemAmount(e.target.value)}
+                  placeholder="Enter amount"
+                  step="0.01"
+                  min="0"
+                />
+              </div>
+              <button
+                className="btn btn-outline w-full"
+                onClick={() => usycTreasury.redeem(usycRedeemAmount)}
+                disabled={
+                  !usycRedeemAmount ||
+                  Number(usycRedeemAmount) <= 0 ||
+                  ["approving", "depositing", "redeeming", "switching"].includes(usycTreasury.status) ||
+                  !isOwner
+                }
+              >
+                {usycTreasury.status === "approving" && "Approving..."}
+                {usycTreasury.status === "redeeming" && "Redeeming..."}
+                {usycTreasury.status === "switching" && "Switching Network..."}
+                {usycTreasury.status === "idle" && "Approve & Redeem"}
+                {usycTreasury.status === "completed" && "Redemption Complete"}
+                {usycTreasury.status === "error" && "Try Again"}
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-4 space-y-2 text-sm">
+            <div className="flex justify-between">
+              <span>Status:</span>
+              <span className="badge badge-primary">{usycTreasury.status}</span>
+            </div>
+            {usycTreasury.txHash && (
+              <div className="flex justify-between">
+                <span>Transaction:</span>
+                <a
+                  href={`https://testnet.arcscan.app/tx/${usycTreasury.txHash}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="link link-primary"
+                >
+                  View on Arcscan
+                </a>
+              </div>
+            )}
+            {usycTreasury.error && (
+              <div className="alert alert-error">
+                <span className="text-sm">{usycTreasury.error}</span>
+              </div>
+            )}
+          </div>
+
+          <div className="divider">Recent USYC Activity</div>
+          {usycTreasury.history.length === 0 && <p className="text-sm opacity-70">No USYC activity yet.</p>}
+          <div className="space-y-2 max-h-64 overflow-y-auto">
+            {usycTreasury.history.map(entry => (
+              <div key={entry.timestamp} className="rounded-lg bg-base-200 p-3 text-sm">
+                <div className="flex justify-between items-center">
+                  <span className="opacity-70">{new Date(entry.timestamp).toLocaleString()}</span>
+                  <span className="badge badge-sm badge-primary">{entry.status}</span>
+                </div>
+                <div className="mt-1 flex justify-between">
+                  <span className="font-medium">{entry.type === "deposit" ? "Subscribe" : "Redeem"}</span>
+                  <span>{entry.amount}</span>
+                </div>
+                {entry.txHash && (
+                  <div className="mt-1">
+                    <a
+                      href={`https://testnet.arcscan.app/tx/${entry.txHash}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="link link-primary text-xs"
+                    >
+                      View Tx →
+                    </a>
+                  </div>
+                )}
+                {entry.error && (
+                  <div className="alert alert-error text-xs p-2 mt-2">
+                    <span>{entry.error}</span>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <div className="divider">Future Upgrade</div>
+          <div className="alert alert-info">
+            <div>
+              <div className="font-semibold">Oracle-based RWA sync (coming soon)</div>
+              <div className="text-sm">
+                Once an on-chain oracle is available, you will be able to sync total RWA value automatically from USYC.
+                Current flow remains manual until then.
+              </div>
+            </div>
+          </div>
+          <div className="mt-3 text-xs opacity-60">Entitlements: {USYC_CONFIG.entitlements}</div>
         </div>
       </div>
 
@@ -182,7 +370,7 @@ export const AdminPanel = () => {
           <button
             className="btn btn-primary mt-2"
             onClick={onWithdrawForInvestment}
-            disabled={isPending || !investAmount || Number(investAmount) <= 0}
+            disabled={isPending || !investAmount || Number(investAmount) <= 0 || !isOwner}
           >
             {isPending ? "Withdrawing..." : "Withdraw for Investment"}
           </button>
@@ -233,7 +421,7 @@ export const AdminPanel = () => {
           <button
             className="btn btn-primary mt-2"
             onClick={onApproveAndDepositYield}
-            disabled={isPending || !yieldAmount || Number(yieldAmount) <= 0}
+            disabled={isPending || !yieldAmount || Number(yieldAmount) <= 0 || !isOwner}
           >
             {isPending ? "Processing..." : "Approve & Deposit Yield"}
           </button>
@@ -264,7 +452,7 @@ export const AdminPanel = () => {
           <button
             className="btn btn-primary mt-2"
             onClick={onUpdateRWAValue}
-            disabled={isPending || !rwaValue || Number(rwaValue) < 0}
+            disabled={isPending || !rwaValue || Number(rwaValue) < 0 || !isOwner}
           >
             {isPending ? "Updating..." : "Update RWA Value"}
           </button>
