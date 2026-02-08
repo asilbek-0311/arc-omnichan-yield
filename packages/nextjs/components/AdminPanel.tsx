@@ -1,9 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { Address } from "@scaffold-ui/components";
 import { formatUnits, parseUnits } from "viem";
 import { useAccount, useWriteContract } from "wagmi";
-import { useDeployedContractInfo, useScaffoldReadContract } from "~~/hooks/scaffold-eth";
+import { useDeployedContractInfo, useScaffoldEventHistory, useScaffoldReadContract } from "~~/hooks/scaffold-eth";
 import { useUscyTreasury } from "~~/hooks/useUscyTreasury";
 import { GATEWAY_CONFIG } from "~~/lib/gateway-config";
 import { USYC_CONFIG } from "~~/lib/usyc-config";
@@ -42,6 +43,7 @@ export const AdminPanel = () => {
     functionName: "totalRWAValue",
   });
   const { data: vaultInfo } = useDeployedContractInfo({ contractName: "RWAVault" });
+  const { data: zapInfo } = useDeployedContractInfo({ contractName: "ZapReceiver" });
 
   const allowlist = useMemo(
     () =>
@@ -54,6 +56,26 @@ export const AdminPanel = () => {
   const isOwner = owner && address && owner.toLowerCase() === address.toLowerCase();
   const isAllowlisted = address ? allowlist.includes(address.toLowerCase()) : false;
   const canViewAdmin = Boolean(isOwner || isAllowlisted);
+
+  const { data: vaultDepositEvents, isLoading: isLoadingVaultDeposits } = useScaffoldEventHistory({
+    contractName: "RWAVault",
+    eventName: "Deposited",
+    watch: true,
+    enabled: canViewAdmin,
+  });
+  const { data: zapCompletedEvents, isLoading: isLoadingZapCompleted } = useScaffoldEventHistory({
+    contractName: "ZapReceiver",
+    eventName: "ZapCompleted",
+    watch: true,
+    enabled: canViewAdmin,
+  });
+  const { data: zapClaimedEvents, isLoading: isLoadingZapClaimed } = useScaffoldEventHistory({
+    contractName: "ZapReceiver",
+    eventName: "PendingDepositClaimed",
+    watch: true,
+    enabled: canViewAdmin,
+  });
+  const isLoadingDepositors = isLoadingVaultDeposits || isLoadingZapCompleted || isLoadingZapClaimed;
 
   const { writeContractAsync: writeVaultAsync, isPending } = useWriteContract();
   const { writeContractAsync: approveAsync } = useWriteContract();
@@ -141,6 +163,46 @@ export const AdminPanel = () => {
     () => (totalRWAValue ? Number(formatUnits(totalRWAValue, 6)).toFixed(2) : "0.00"),
     [totalRWAValue],
   );
+  const depositors = useMemo(() => {
+    const depositorMap = new Map<string, { address: `0x${string}`; totalDeposited: bigint; depositCount: number }>();
+
+    const addDepositor = (user: `0x${string}`, amount: bigint) => {
+      const key = user.toLowerCase();
+      const existing = depositorMap.get(key) ?? { address: user, totalDeposited: 0n, depositCount: 0 };
+      existing.totalDeposited += amount;
+      existing.depositCount += 1;
+      depositorMap.set(key, existing);
+    };
+
+    const zapReceiverAddress = zapInfo?.address?.toLowerCase();
+
+    for (const event of vaultDepositEvents ?? []) {
+      const user = event?.args?.user as `0x${string}` | undefined;
+      if (!user) continue;
+      if (zapReceiverAddress && user.toLowerCase() === zapReceiverAddress) continue;
+      const amount = (event?.args as { usdcIn?: bigint })?.usdcIn ?? 0n;
+      addDepositor(user, amount);
+    }
+
+    for (const event of zapCompletedEvents ?? []) {
+      const recipient = (event?.args as { recipient?: `0x${string}` })?.recipient;
+      if (!recipient) continue;
+      const amount = (event?.args as { usdcAmount?: bigint })?.usdcAmount ?? 0n;
+      addDepositor(recipient, amount);
+    }
+
+    for (const event of zapClaimedEvents ?? []) {
+      const user = (event?.args as { user?: `0x${string}` })?.user;
+      if (!user) continue;
+      const amount = (event?.args as { amount?: bigint })?.amount ?? 0n;
+      addDepositor(user, amount);
+    }
+
+    return Array.from(depositorMap.values()).sort((a, b) => {
+      if (a.totalDeposited === b.totalDeposited) return 0;
+      return a.totalDeposited > b.totalDeposited ? -1 : 1;
+    });
+  }, [vaultDepositEvents, zapCompletedEvents, zapClaimedEvents, zapInfo?.address]);
 
   if (!canViewAdmin) {
     return (
@@ -177,6 +239,31 @@ export const AdminPanel = () => {
               <div className="text-xl font-semibold">{formattedRWA}</div>
             </div>
           </div>
+        </div>
+      </div>
+
+      <div className="card bg-base-100 shadow-xl">
+        <div className="card-body">
+          <div className="flex items-center justify-between">
+            <h2 className="card-title">Depositors</h2>
+            <span className="badge badge-outline">{depositors.length}</span>
+          </div>
+          <p className="text-sm opacity-70">Unique wallets that have deposited into the vault.</p>
+          {isLoadingDepositors && <p className="text-sm opacity-70">Loading depositors...</p>}
+          {!isLoadingDepositors && depositors.length === 0 && <p className="text-sm opacity-70">No deposits yet.</p>}
+          {depositors.length > 0 && (
+            <div className="mt-4 space-y-3 max-h-72 overflow-y-auto">
+              {depositors.map(depositor => (
+                <div key={depositor.address} className="flex items-center justify-between rounded-lg bg-base-200 p-3">
+                  <Address address={depositor.address} onlyEnsOrAddress />
+                  <div className="text-right text-sm">
+                    <div className="font-semibold">{formatUnits(depositor.totalDeposited, 6)} USDC</div>
+                    <div className="text-xs opacity-60">{depositor.depositCount} deposits</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 

@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { Address, AddressInput } from "@scaffold-ui/components";
 import type { NextPage } from "next";
+import { Address as AddressType } from "viem";
 import { useAccount } from "wagmi";
 import { useTargetNetwork } from "~~/hooks/scaffold-eth";
 
@@ -10,6 +12,7 @@ const Home: NextPage = () => {
   const { address: connectedAddress } = useAccount();
   const { targetNetwork } = useTargetNetwork();
   const [isRedirecting, setIsRedirecting] = useState(true);
+  const [lookupAddress, setLookupAddress] = useState<AddressType>();
 
   // useEffect(() => {
   //   const timeout = setTimeout(() => {
@@ -57,9 +60,13 @@ const Home: NextPage = () => {
                   </Link>
                 </div>
                 <div className="mt-6 flex flex-wrap gap-6 text-xs uppercase tracking-[0.2em] text-base-content/60">
-                  <span>
+                  <span className="flex items-center gap-2">
                     Connected:{" "}
-                    {connectedAddress ? `${connectedAddress.slice(0, 6)}...${connectedAddress.slice(-4)}` : "—"}
+                    {connectedAddress ? (
+                      <Address address={connectedAddress} onlyEnsOrAddress />
+                    ) : (
+                      <span className="opacity-60">--</span>
+                    )}
                   </span>
                   <span>Network: {targetNetwork.name}</span>
                 </div>
@@ -118,6 +125,27 @@ const Home: NextPage = () => {
               <div className="text-xs uppercase tracking-[0.2em] text-primary/70">Transparency</div>
               <h3 className="mt-3 text-lg font-semibold">On-chain vault</h3>
               <p className="mt-2 text-sm opacity-70">Monitor TVL, share price, and admin activity on-chain.</p>
+            </div>
+            <div className="glass-panel p-6 md:col-span-3">
+              <div className="text-xs uppercase tracking-[0.2em] text-primary/70">ENS Lookup</div>
+              <h3 className="mt-3 text-lg font-semibold">Resolve an ENS name</h3>
+              <p className="mt-2 text-sm opacity-70">
+                Paste an address or ENS name to preview how it will appear across the app.
+              </p>
+              <div className="mt-4 grid gap-3 md:grid-cols-[1.4fr_1fr]">
+                <AddressInput
+                  placeholder="vitalik.eth or 0x..."
+                  value={lookupAddress ?? ""}
+                  onChange={value => setLookupAddress(value as AddressType)}
+                />
+                <div className="rounded-xl bg-base-200 p-4 text-sm">
+                  {lookupAddress ? (
+                    <Address address={lookupAddress} onlyEnsOrAddress />
+                  ) : (
+                    <span className="opacity-60">Enter a name to resolve.</span>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
         </section>
