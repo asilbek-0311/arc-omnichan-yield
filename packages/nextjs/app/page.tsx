@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-// import { useRouter } from "next/navigation";
 import type { NextPage } from "next";
 import { useAccount } from "wagmi";
 import { useTargetNetwork } from "~~/hooks/scaffold-eth";
@@ -10,7 +9,6 @@ import { useTargetNetwork } from "~~/hooks/scaffold-eth";
 const Home: NextPage = () => {
   const { address: connectedAddress } = useAccount();
   const { targetNetwork } = useTargetNetwork();
-  // const router = useRouter();
   const [isRedirecting, setIsRedirecting] = useState(true);
 
   // useEffect(() => {
