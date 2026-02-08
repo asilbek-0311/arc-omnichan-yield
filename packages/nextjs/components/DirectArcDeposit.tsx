@@ -198,7 +198,12 @@ export const DirectArcDeposit = () => {
 
         {balanceError && (
           <div className="alert alert-error">
-            <span className="text-sm">{balanceError}</span>
+            <div className="w-full">
+              <div className="text-xs uppercase tracking-[0.2em] text-error/80">Balance Error</div>
+              <div className="mt-2 max-h-24 overflow-y-auto pr-1 text-xs leading-relaxed whitespace-pre-wrap break-words">
+                {balanceError}
+              </div>
+            </div>
           </div>
         )}
 
@@ -238,7 +243,12 @@ export const DirectArcDeposit = () => {
           )}
           {vaultDeposit.error && (
             <div className="alert alert-error">
-              <span className="text-sm">{vaultDeposit.error}</span>
+              <div className="w-full">
+                <div className="text-xs uppercase tracking-[0.2em] text-error/80">Transaction Error</div>
+                <div className="mt-2 max-h-24 overflow-y-auto pr-1 text-xs leading-relaxed whitespace-pre-wrap break-words">
+                  {vaultDeposit.error}
+                </div>
+              </div>
             </div>
           )}
         </div>
