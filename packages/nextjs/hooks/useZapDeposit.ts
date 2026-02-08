@@ -1,12 +1,81 @@
 /**
- * useZapDeposit - Single-transaction cross-chain zap
+ * useZapDeposit - One-Click Cross-Chain Zap Hook
  *
- * Hybrid Approach:
- * 1. If user has non-USDC token: Use LiFi to swap to USDC on source chain
- * 2. Use Circle Gateway to bridge USDC from source chain to Arc
- * 3. ZapReceiver on Arc automatically deposits to RWAVault
+ * Enables single-transaction deposits from any supported chain to Arc Omnichain Yield vault.
  *
- * This reduces UX from 4-6 transactions to just 1-2 transactions + passive wait
+ * ## Architecture
+ *
+ * **Hybrid Approach:**
+ * 1. **Token Swap (Optional)**: Use LiFi to swap any token → USDC on source chain
+ * 2. **Cross-Chain Bridge**: Use Circle Gateway CCTP to bridge USDC → Arc
+ * 3. **Auto-Deposit**: ZapReceiver on Arc automatically deposits USDC → RWAVault
+ * 4. **Receive yRWA**: User receives yRWA shares representing vault position
+ *
+ * **UX Improvement:**
+ * - Traditional flow: 4-6 transactions (swap → approve → deposit → switch → wait → approve → deposit)
+ * - Zap flow: 1-2 transactions + passive wait
+ *
+ * ## State Machine
+ *
+ * ```
+ * idle → quoting → switching → [approving_swap → swapping] → approving_gateway →
+ * depositing_gateway → bridging → awaiting_claim → claiming → completed
+ * ```
+ *
+ * **Status Descriptions:**
+ * - `idle`: Initial state, no operation in progress
+ * - `quoting`: Fetching swap route from LiFi
+ * - `switching`: Switching to source chain
+ * - `approving_swap`: Approving token for LiFi swap (optional)
+ * - `swapping`: Executing LiFi swap to USDC (optional)
+ * - `approving_gateway`: Approving USDC for Circle Gateway
+ * - `depositing_gateway`: Calling depositForBurn on Circle Gateway
+ * - `bridging`: Waiting for Circle CCTP attestation
+ * - `awaiting_claim`: USDC arrived at ZapReceiver, needs manual claim
+ * - `claiming`: Processing bridged deposit to vault
+ * - `completed`: Successfully minted yRWA
+ * - `failed`: Error occurred, see error message
+ *
+ * ## Integration Points
+ *
+ * **Circle Gateway CCTP:**
+ * - Burns USDC on source chain
+ * - Mints native USDC on Arc testnet
+ * - Directly to ZapReceiver address (mintRecipient parameter)
+ * - Domain IDs: Sepolia (0), Fuji (1), Arb Sepolia (3), Base Sepolia (6), Arc (5)
+ *
+ * **LiFi Integration:**
+ * - Multi-hop token swaps
+ * - Best price routing across DEXs
+ * - Optional - only if token != USDC
+ *
+ * **ZapReceiver Contract:**
+ * - Receives USDC from Circle Gateway
+ * - Approves and deposits to RWAVault
+ * - Transfers yRWA shares to user
+ * - Graceful failure handling with pendingDeposits
+ *
+ * ## Transaction Tracking
+ *
+ * All transactions are recorded with:
+ * - Hash: Transaction hash
+ * - ChainId: Network where tx was submitted
+ * - Step: Human-readable step name
+ * - Timestamp: Unix timestamp
+ *
+ * ## Error Handling
+ *
+ * **Transaction Verification:**
+ * - All receipts checked for `status === "reverted"`
+ * - Descriptive error messages for each failure scenario
+ * - Failed zaps stored in history for recovery
+ *
+ * **Recovery Mechanisms:**
+ * - If vault deposit fails: USDC stored in ZapReceiver.pendingDeposits
+ * - User can call claimAndDeposit() to retry
+ * - Admin can use recoverFunds() for emergency recovery
+ *
+ * @module useZapDeposit
  */
 import { useCallback, useState } from "react";
 import { useZapHistory } from "./useDepositHistory";
@@ -135,6 +204,71 @@ const gatewayWalletAbi = [
   },
 ] as const;
 
+/**
+ * One-click cross-chain deposit hook for Arc Omnichain Yield
+ *
+ * @returns Object containing zap functions and state
+ * @property {Function} getQuote - Fetch quote for zapping token to yRWA
+ * @property {Function} executeZap - Execute full zap flow (swap + bridge + deposit)
+ * @property {Function} claimAndDeposit - Manually claim bridged USDC and deposit to vault
+ * @property {Function} reset - Reset hook state to idle
+ * @property {ZapStatus} status - Current zap status (idle | quoting | swapping | etc.)
+ * @property {ZapQuote | null} quote - Quote details (if available)
+ * @property {number} progress - Progress percentage (0-100)
+ * @property {string} currentStep - Human-readable current step
+ * @property {Hex | null} txHash - Most recent transaction hash
+ * @property {number | null} txChainId - Chain ID where txHash was submitted
+ * @property {TransactionRecord[]} transactions - All transactions in this zap
+ * @property {string | null} error - Error message (if failed)
+ *
+ * @example Basic Usage
+ * ```tsx
+ * const {
+ *   getQuote,
+ *   executeZap,
+ *   status,
+ *   progress,
+ *   transactions,
+ *   error
+ * } = useZapDeposit();
+ *
+ * // 1. Get quote
+ * const quote = await getQuote({
+ *   sourceChain: "sepolia",
+ *   sourceToken: "0x...", // Token address
+ *   sourceAmount: parseUnits("10", 18), // 10 tokens
+ *   recipient: userAddress,
+ * });
+ *
+ * // 2. Execute zap
+ * await executeZap(quote);
+ *
+ * // 3. Monitor progress
+ * console.log(`Status: ${status}, Progress: ${progress}%`);
+ * ```
+ *
+ * @example With Error Handling
+ * ```tsx
+ * try {
+ *   const quote = await getQuote({...});
+ *   if (quote.needsSwap) {
+ *     console.log(`Swapping ${sourceToken} → USDC via LiFi`);
+ *   }
+ *   await executeZap(quote);
+ * } catch (err) {
+ *   console.error('Zap failed:', error);
+ *   // Check if USDC stuck in ZapReceiver
+ *   await claimAndDeposit(userAddress);
+ * }
+ * ```
+ *
+ * @example Transaction Tracking
+ * ```tsx
+ * transactions.forEach(tx => {
+ *   console.log(`${tx.step}: ${tx.hash} on chain ${tx.chainId}`);
+ * });
+ * ```
+ */
 export const useZapDeposit = () => {
   const { address } = useAccount();
   const { data: walletClient } = useWalletClient();
