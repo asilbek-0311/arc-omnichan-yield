@@ -21,7 +21,6 @@ export { getChains, getRoutes };
  */
 export const LIFI_CHAIN_IDS: Record<string, number> = {
   sepolia: 11155111, // Ethereum Sepolia
-  arbitrumSepolia: 421614, // Arbitrum Sepolia
   baseSepolia: 84532, // Base Sepolia
   avalancheFuji: 43113, // Avalanche Fuji
 } as const;
@@ -34,14 +33,6 @@ export const USDC_TOKENS: Record<string, StaticToken> = {
   sepolia: {
     address: process.env.NEXT_PUBLIC_USDC_SEPOLIA!,
     chainId: LIFI_CHAIN_IDS.sepolia,
-    symbol: "USDC",
-    decimals: 6,
-    name: "USD Coin",
-    logoURI: "https://assets.coingecko.com/coins/images/6319/small/USD_Coin_icon.png",
-  },
-  arbitrumSepolia: {
-    address: process.env.NEXT_PUBLIC_USDC_ARBITRUM_SEPOLIA!,
-    chainId: LIFI_CHAIN_IDS.arbitrumSepolia,
     symbol: "USDC",
     decimals: 6,
     name: "USD Coin",
@@ -103,10 +94,9 @@ export async function getAvailableStaticTokens(): Promise<StaticToken[]> {
  */
 export const CIRCLE_GATEWAY_DOMAINS: Record<string, number> = {
   sepolia: 0, // Ethereum Sepolia
-  arbitrumSepolia: 3, // Arbitrum Sepolia
   baseSepolia: 6, // Base Sepolia
   avalancheFuji: 1, // Avalanche Fuji
-  arcTestnet: 99999, // Arc Testnet (custom domain - check Circle docs)
+  arcTestnet: 26, // Arc Testnet (Circle Gateway)
 } as const;
 
 export type SupportedChainKey = keyof typeof LIFI_CHAIN_IDS;
@@ -138,7 +128,6 @@ export function validateLiFiConfig(): { valid: boolean; missing: string[] } {
 
   const requiredEnvVars = [
     "NEXT_PUBLIC_USDC_SEPOLIA",
-    "NEXT_PUBLIC_USDC_ARBITRUM_SEPOLIA",
     "NEXT_PUBLIC_USDC_BASE_SEPOLIA",
     "NEXT_PUBLIC_USDC_AVAX_FUJI",
     "NEXT_PUBLIC_USDC_ARC_TESTNET",

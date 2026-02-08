@@ -3,7 +3,7 @@
 A cross-chain yield vault that allows users to deposit USDC from multiple chains and earn yield on real-world assets (RWA) on Arc blockchain. The protocol uses Circle's Cross-Chain Transfer Protocol (CCTP) for secure USDC bridging and LiFi for token swaps, providing a seamless multi-chain deposit experience.
 
 **Key Features:**
-- 🌉 **Multi-Chain Deposits**: Deposit USDC from Sepolia, Arbitrum Sepolia, Base Sepolia, or Avalanche Fuji
+- 🌉 **Multi-Chain Deposits**: Deposit USDC from Sepolia, Base Sepolia, or Avalanche Fuji
 - ⚡ **One-Click Zap**: Single transaction to swap any token → bridge USDC → deposit to vault
 - 💰 **Yield Distribution**: 80% of yield increases share price, 20% goes to treasury
 - 🔒 **Secure Bridging**: Leverages Circle's CCTP for native USDC bridging
@@ -52,7 +52,6 @@ graph TB
 
     subgraph "Source Chains"
         Sepolia[Sepolia USDC]
-        Arbitrum[Arbitrum Sepolia USDC]
         Base[Base Sepolia USDC]
         Fuji[Avalanche Fuji USDC]
     end
@@ -68,12 +67,10 @@ graph TB
     end
 
     User -->|deposit| Sepolia
-    User -->|deposit| Arbitrum
     User -->|deposit| Base
     User -->|deposit| Fuji
 
     Sepolia -->|burn & mint| GW
-    Arbitrum -->|burn & mint| GW
     Base -->|burn & mint| GW
     Fuji -->|burn & mint| GW
 
@@ -242,7 +239,6 @@ Configure these variables in `packages/nextjs/.env.local`:
 | `NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID` | Optional | WalletConnect integration | [WalletConnect Cloud](https://cloud.walletconnect.com/) |
 | **Circle Gateway** |
 | `NEXT_PUBLIC_USDC_SEPOLIA` | Yes | USDC address on Sepolia | Circle USDC contract |
-| `NEXT_PUBLIC_USDC_ARBITRUM_SEPOLIA` | Yes | USDC address on Arbitrum Sepolia | Circle USDC contract |
 | `NEXT_PUBLIC_USDC_BASE_SEPOLIA` | Yes | USDC address on Base Sepolia | Circle USDC contract |
 | `NEXT_PUBLIC_USDC_AVAX_FUJI` | Yes | USDC address on Avalanche Fuji | Circle USDC contract |
 | `NEXT_PUBLIC_USDC_ARC_TESTNET` | Yes | USDC address on Arc Testnet | Circle USDC contract |
@@ -578,7 +574,7 @@ await executeZap();
 const { executeDeposits, txHashes, isLoading } = useMultiChainDeposit({
   deposits: [
     { chainId: 11155111, amount: "1000000" }, // 1 USDC on Sepolia
-    { chainId: 421614, amount: "2000000" }    // 2 USDC on Arbitrum Sepolia
+    { chainId: 84532, amount: "2000000" }     // 2 USDC on Base Sepolia
   ],
   onSuccess: () => console.log("Deposits completed!")
 });
@@ -743,7 +739,6 @@ Circle's Cross-Chain Transfer Protocol (CCTP) enables native USDC transfers betw
 **Domain IDs:**
 - Sepolia: `0`
 - Avalanche Fuji: `1`
-- Arbitrum Sepolia: `3`
 - Base Sepolia: `6`
 - Arc Testnet: `5`
 
@@ -1026,7 +1021,6 @@ yarn foundry:test
 |---------|----------|-----------|----------------|
 | **Arc Testnet** | 5042002 | 5 | https://testnet.arcscan.com/ |
 | Sepolia | 11155111 | 0 | https://sepolia.etherscan.io/ |
-| Arbitrum Sepolia | 421614 | 3 | https://sepolia.arbiscan.io/ |
 | Base Sepolia | 84532 | 6 | https://sepolia.basescan.org/ |
 | Avalanche Fuji | 43113 | 1 | https://testnet.snowtrace.io/ |
 
@@ -1052,19 +1046,19 @@ RPC endpoints are configured in:
 1. Add network to `scaffold.config.ts`:
    ```typescript
    {
-     id: 421614,
-     name: "Arbitrum Sepolia",
+     id: 84532,
+     name: "Base Sepolia",
      nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 },
-     rpcUrls: { default: { http: ["https://sepolia-rollup.arbitrum.io/rpc"] } },
-     blockExplorers: { default: { name: "Arbiscan", url: "https://sepolia.arbiscan.io" } },
+     rpcUrls: { default: { http: ["https://sepolia.base.org"] } },
+     blockExplorers: { default: { name: "BaseScan", url: "https://sepolia.basescan.org" } },
    }
    ```
 
 2. Add to Circle Gateway config (`gateway-config.ts`):
    ```typescript
    {
-     chainId: 421614,
-     domainId: 3,
+     chainId: 84532,
+     domainId: 6,
      gatewayWallet: "0x...",
      usdcAddress: "0x...",
    }

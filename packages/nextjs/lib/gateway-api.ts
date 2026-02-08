@@ -10,17 +10,39 @@ export type UnifiedBalanceResponse = {
 };
 
 export type BurnIntentPayload = {
-  chainId: number;
-  token: string;
-  amount: string;
-  recipient: string;
-  domain: number;
+  maxBlockHeight: string;
+  maxFee: string;
+  feeToken: string;
+  sourceDomain: number;
+  destinationDomain: number;
+  spec: {
+    version: string;
+    sourceDomain: number;
+    destinationDomain: number;
+    sourceContract: string;
+    destinationContract: string;
+    sourceToken: string;
+    destinationToken: string;
+    sourceDepositor: string;
+    destinationRecipient: string;
+    sourceSigner: string;
+    destinationCaller: string;
+    value: string;
+    salt: string;
+    hookData: string;
+  };
+};
+
+export type TransferIntent = {
+  burnIntent: BurnIntentPayload;
   signature: string;
 };
 
 export type TransferResponse = {
-  attestationId: string;
-  status: "pending" | "complete";
+  attestation: string;
+  signature: string;
+  transferId: string;
+  expirationBlock?: string;
 };
 
 async function gatewayFetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -51,9 +73,9 @@ export async function createBurnIntents(payload: Omit<BurnIntentPayload, "signat
   });
 }
 
-export async function submitTransfer(intents: BurnIntentPayload[]) {
+export async function submitTransfer(intents: TransferIntent[]) {
   return gatewayFetch<TransferResponse>(`/transfer`, {
     method: "POST",
-    body: JSON.stringify({ intents }),
+    body: JSON.stringify(intents),
   });
 }

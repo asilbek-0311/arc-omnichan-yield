@@ -4,9 +4,10 @@ import { useState } from "react";
 import { TransactionList } from "./TransactionList";
 import { ZapProgress } from "./ZapProgress";
 import { type Address, formatUnits } from "viem";
-import { useAccount } from "wagmi";
+import { useAccount, useChainId, useSwitchChain } from "wagmi";
 import { type ZapQuote, useZapDeposit } from "~~/hooks/useZapDeposit";
-import type { SupportedChainKey } from "~~/lib/lifi-config";
+import { LIFI_CHAIN_IDS, type SupportedChainKey } from "~~/lib/lifi-config";
+import { notification } from "~~/utils/scaffold-eth";
 
 type ChainOption = {
   key: SupportedChainKey;
@@ -16,18 +17,20 @@ type ChainOption = {
 
 const CHAIN_OPTIONS: ChainOption[] = [
   { key: "sepolia", label: "Sepolia", icon: "🔷" },
-  { key: "arbitrumSepolia", label: "Arbitrum Sepolia", icon: "🔵" },
   { key: "baseSepolia", label: "Base Sepolia", icon: "🔵" },
   { key: "avalancheFuji", label: "Avalanche Fuji", icon: "🔺" },
 ];
 
 export const OneClickZap = () => {
   const { isConnected } = useAccount();
-  const { state, getQuote, executeZap, claimAndDeposit, reset } = useZapDeposit();
+  const chainId = useChainId();
+  const { switchChainAsync } = useSwitchChain();
+  const { state, getQuote, executeZap, reset } = useZapDeposit();
 
   const [sourceChain, setSourceChain] = useState<SupportedChainKey>("sepolia");
   const [amount, setAmount] = useState("");
   const [quote, setQuote] = useState<ZapQuote | null>(null);
+  const [isSwitchingChain, setIsSwitchingChain] = useState(false);
 
   const handleGetQuote = async () => {
     if (!amount || parseFloat(amount) <= 0) {
@@ -39,7 +42,6 @@ export const OneClickZap = () => {
       // In production, add token selector for multi-token support
       const usdcAddresses: Record<SupportedChainKey, Address> = {
         sepolia: process.env.NEXT_PUBLIC_USDC_SEPOLIA as Address,
-        arbitrumSepolia: process.env.NEXT_PUBLIC_USDC_ARBITRUM_SEPOLIA as Address,
         baseSepolia: process.env.NEXT_PUBLIC_USDC_BASE_SEPOLIA as Address,
         avalancheFuji: process.env.NEXT_PUBLIC_USDC_AVAX_FUJI as Address,
       };
@@ -67,6 +69,25 @@ export const OneClickZap = () => {
     setAmount("");
   };
 
+  const handleChainChange = async (newChain: SupportedChainKey) => {
+    setSourceChain(newChain);
+
+    // Auto-switch to the selected chain
+    const targetChainId = LIFI_CHAIN_IDS[newChain];
+    if (chainId !== targetChainId && !isSwitchingChain) {
+      try {
+        setIsSwitchingChain(true);
+        await switchChainAsync({ chainId: targetChainId });
+        notification.success(`Switched to ${CHAIN_OPTIONS.find(c => c.key === newChain)?.label}`);
+      } catch (error) {
+        console.error("Failed to switch chain:", error);
+        notification.warning("Please manually switch to the selected chain");
+      } finally {
+        setIsSwitchingChain(false);
+      }
+    }
+  };
+
   if (!isConnected) {
     return (
       <div className="card bg-base-100 shadow-xl">
@@ -86,6 +107,9 @@ export const OneClickZap = () => {
           Deposit USDC from any supported chain. Your USDC will be automatically bridged to Arc and deposited into the
           vault.
         </p>
+        <div className="alert alert-info text-xs">
+          <span>💡 Currently supports USDC deposits only. Multi-token support coming soon!</span>
+        </div>
 
         {state.status === "idle" || state.status === "quoting" ? (
           <>
@@ -97,8 +121,8 @@ export const OneClickZap = () => {
               <select
                 className="select select-bordered w-full"
                 value={sourceChain}
-                onChange={e => setSourceChain(e.target.value as SupportedChainKey)}
-                disabled={state.status === "quoting"}
+                onChange={e => handleChainChange(e.target.value as SupportedChainKey)}
+                disabled={state.status === "quoting" || isSwitchingChain}
               >
                 {CHAIN_OPTIONS.map(chain => (
                   <option key={chain.key} value={chain.key}>
@@ -106,6 +130,14 @@ export const OneClickZap = () => {
                   </option>
                 ))}
               </select>
+              {isSwitchingChain && (
+                <label className="label">
+                  <span className="label-text-alt flex items-center gap-2">
+                    <span className="loading loading-spinner loading-xs"></span>
+                    Switching chain...
+                  </span>
+                </label>
+              )}
             </div>
 
             {/* Amount Input */}
@@ -179,21 +211,6 @@ export const OneClickZap = () => {
             {/* Transaction History */}
             <TransactionList transactions={state.transactions} />
 
-            {/* Actions */}
-            {state.status === "awaiting_claim" && quote && (
-              <div className="card-actions justify-end mt-4">
-                <div className="alert alert-warning mb-4">
-                  <span>
-                    Your USDC has arrived on Arc! Click below to claim and deposit it to the vault to receive yRWA
-                    tokens.
-                  </span>
-                </div>
-                <button className="btn btn-primary btn-lg w-full" onClick={() => claimAndDeposit(quote.estimatedUSDC)}>
-                  Claim & Deposit to Vault
-                </button>
-              </div>
-            )}
-
             {(state.status === "completed" || state.status === "failed") && (
               <div className="card-actions justify-end mt-4">
                 <button className="btn btn-primary" onClick={handleReset}>
@@ -210,8 +227,8 @@ export const OneClickZap = () => {
           <p className="mb-2">How it works:</p>
           <ol className="list-decimal list-inside space-y-1">
             <li>Deposit USDC to Circle Gateway on your selected chain</li>
-            <li>Circle Gateway bridges USDC to Arc (5-10 minutes)</li>
-            <li>Click &quot;Claim &amp; Deposit&quot; to process the bridged USDC</li>
+            <li>Sign the burn intent and submit the Gateway transfer</li>
+            <li>Gateway mints USDC on Arc and deposits to the vault</li>
             <li>You receive yRWA tokens representing your vault share</li>
           </ol>
         </div>

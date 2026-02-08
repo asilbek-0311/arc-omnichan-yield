@@ -2,10 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { formatUnits, parseUnits } from "viem";
-import { useAccount, useChainId, usePublicClient } from "wagmi";
+import { useAccount, useChainId, usePublicClient, useSwitchChain } from "wagmi";
 import { useDepositHistory } from "~~/hooks/useDepositHistory";
 import { useVaultDeposit } from "~~/hooks/useVaultDeposit";
 import { GATEWAY_CONFIG } from "~~/lib/gateway-config";
+import { notification } from "~~/utils/scaffold-eth";
 
 const erc20Abi = [
   {
@@ -22,7 +23,6 @@ const getExplorerUrl = (chainId: number, txHash: string) => {
     11155111: "https://sepolia.etherscan.io/tx/",
     43113: "https://testnet.snowtrace.io/tx/",
     84532: "https://sepolia.basescan.org/tx/",
-    421614: "https://sepolia.arbiscan.io/tx/",
     5042002: "https://testnet.arcscan.app/tx/",
   };
   return explorers[chainId] ? `${explorers[chainId]}${txHash}` : null;
@@ -31,6 +31,7 @@ const getExplorerUrl = (chainId: number, txHash: string) => {
 export const DirectArcDeposit = () => {
   const { address, isConnected } = useAccount();
   const chainId = useChainId();
+  const { switchChainAsync } = useSwitchChain();
   const publicClient = usePublicClient({ chainId: GATEWAY_CONFIG.destinationChainId });
   const { saveDeposit, updateDeposit } = useDepositHistory(address);
   const vaultDeposit = useVaultDeposit();
@@ -40,6 +41,7 @@ export const DirectArcDeposit = () => {
   const [balanceError, setBalanceError] = useState<string | null>(null);
   const [amount, setAmount] = useState("");
   const [activeHistoryId, setActiveHistoryId] = useState<number | null>(null);
+  const [isSwitchingChain, setIsSwitchingChain] = useState(false);
 
   const loadBalance = useCallback(async () => {
     if (!address || !publicClient) return;
@@ -61,6 +63,28 @@ export const DirectArcDeposit = () => {
       setIsLoadingBalance(false);
     }
   }, [address, publicClient]);
+
+  // Auto-switch to Arc when component loads
+  useEffect(() => {
+    const switchToArc = async () => {
+      if (isConnected && chainId !== GATEWAY_CONFIG.destinationChainId && !isSwitchingChain) {
+        try {
+          setIsSwitchingChain(true);
+          await switchChainAsync({ chainId: GATEWAY_CONFIG.destinationChainId });
+          // Don't show success here - useVaultDeposit will verify and show success
+        } catch (error) {
+          console.error("Failed to switch to Arc:", error);
+          notification.warning("Please manually switch to Arc Testnet to continue");
+        } finally {
+          setIsSwitchingChain(false);
+        }
+      }
+    };
+
+    // Only auto-switch once when component first loads
+    switchToArc();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isConnected]);
 
   useEffect(() => {
     if (isConnected) {
@@ -153,7 +177,12 @@ export const DirectArcDeposit = () => {
 
         {chainId !== GATEWAY_CONFIG.destinationChainId && (
           <div className="alert alert-warning">
-            <span>Please switch to Arc Testnet to continue. We can switch automatically when you deposit.</span>
+            <div className="flex items-center gap-2">
+              {isSwitchingChain && <span className="loading loading-spinner loading-sm"></span>}
+              <span>
+                {isSwitchingChain ? "Switching to Arc Testnet..." : "Please switch to Arc Testnet to continue"}
+              </span>
+            </div>
           </div>
         )}
 

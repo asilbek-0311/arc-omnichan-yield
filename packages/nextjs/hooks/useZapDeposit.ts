@@ -7,8 +7,8 @@
  *
  * **Hybrid Approach:**
  * 1. **Token Swap (Optional)**: Use LiFi to swap any token → USDC on source chain
- * 2. **Cross-Chain Bridge**: Use Circle Gateway CCTP to bridge USDC → Arc
- * 3. **Auto-Deposit**: ZapReceiver on Arc automatically deposits USDC → RWAVault
+ * 2. **Gateway Transfer**: Use Circle Gateway unified balance to move USDC → Arc
+ * 3. **Auto-Deposit**: ZapReceiver on Arc deposits USDC → RWAVault
  * 4. **Receive yRWA**: User receives yRWA shares representing vault position
  *
  * **UX Improvement:**
@@ -19,7 +19,8 @@
  *
  * ```
  * idle → quoting → switching → [approving_swap → swapping] → approving_gateway →
- * depositing_gateway → bridging → awaiting_claim → claiming → completed
+ * depositing_gateway → signing_intent → transferring_gateway → minting_gateway →
+ * depositing_vault → completed
  * ```
  *
  * **Status Descriptions:**
@@ -28,21 +29,21 @@
  * - `switching`: Switching to source chain
  * - `approving_swap`: Approving token for LiFi swap (optional)
  * - `swapping`: Executing LiFi swap to USDC (optional)
- * - `approving_gateway`: Approving USDC for Circle Gateway
- * - `depositing_gateway`: Calling depositForBurn on Circle Gateway
- * - `bridging`: Waiting for Circle CCTP attestation
- * - `awaiting_claim`: USDC arrived at ZapReceiver, needs manual claim
- * - `claiming`: Processing bridged deposit to vault
+ * - `approving_gateway`: Approving USDC for GatewayWallet
+ * - `depositing_gateway`: Depositing to GatewayWallet
+ * - `signing_intent`: Signing burn intent (EIP-712)
+ * - `transferring_gateway`: Submitting transfer to Gateway API
+ * - `minting_gateway`: Minting USDC on Arc via GatewayMinter
  * - `completed`: Successfully minted yRWA
  * - `failed`: Error occurred, see error message
  *
  * ## Integration Points
  *
- * **Circle Gateway CCTP:**
- * - Burns USDC on source chain
- * - Mints native USDC on Arc testnet
- * - Directly to ZapReceiver address (mintRecipient parameter)
- * - Domain IDs: Sepolia (0), Fuji (1), Arb Sepolia (3), Base Sepolia (6), Arc (5)
+ * **Circle Gateway Unified Balance:**
+ * - Deposits USDC into GatewayWallet on source chain
+ * - Signs burn intent and submits to Gateway API
+ * - Mints native USDC on Arc via GatewayMinter
+ * - Domain IDs: Sepolia (0), Fuji (1), Base Sepolia (6), Arc (26)
  *
  * **LiFi Integration:**
  * - Multi-hop token swaps
@@ -72,7 +73,6 @@
  *
  * **Recovery Mechanisms:**
  * - If vault deposit fails: USDC stored in ZapReceiver.pendingDeposits
- * - User can call claimAndDeposit() to retry
  * - Admin can use recoverFunds() for emergency recovery
  *
  * @module useZapDeposit
@@ -80,9 +80,10 @@
 import { useCallback, useState } from "react";
 import { useZapHistory } from "./useDepositHistory";
 import type { Route } from "@lifi/types";
-import { type Address, type Hex, createPublicClient, http, parseUnits } from "viem";
+import { type Address, type Hex, createPublicClient, http, maxUint256, pad, parseUnits, toHex } from "viem";
 import * as chains from "viem/chains";
 import { useAccount, useSwitchChain, useWalletClient } from "wagmi";
+import { type TransferIntent, submitTransfer } from "~~/lib/gateway-api";
 import { GATEWAY_CONFIG, type GatewayChainKey } from "~~/lib/gateway-config";
 import { LIFI_CHAIN_IDS, type SupportedChainKey, getRoutes, getUSDCAddress, needsSwap } from "~~/lib/lifi-config";
 import { notification } from "~~/utils/scaffold-eth/notification";
@@ -94,10 +95,10 @@ export type ZapStatus =
   | "approving_swap" // Approving token for LiFi swap
   | "swapping" // Executing LiFi swap to USDC
   | "approving_gateway" // Approving USDC for Gateway
-  | "depositing_gateway" // Depositing to Circle Gateway
-  | "bridging" // Waiting for Circle Gateway bridge
-  | "awaiting_claim" // USDC arrived on Arc, needs manual claim
-  | "claiming" // Claiming and depositing to vault
+  | "depositing_gateway" // Depositing to GatewayWallet
+  | "signing_intent" // Signing burn intent
+  | "transferring_gateway" // Submitting transfer to Gateway API
+  | "minting_gateway" // Minting on Arc via GatewayMinter
   | "depositing_vault" // ZapReceiver depositing to vault on Arc
   | "completed"
   | "failed";
@@ -135,7 +136,6 @@ const chainMap = {
   sepolia: chains.sepolia,
   avalancheFuji: chains.avalancheFuji,
   baseSepolia: chains.baseSepolia,
-  arbitrumSepolia: chains.arbitrumSepolia,
   arcTestnet: chains.arcTestnet,
 } as const;
 
@@ -148,6 +148,104 @@ const getPublicClient = (chainKey: SupportedChainKey) => {
 };
 
 const MAX_UINT256 = BigInt("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
+
+type TransferSpec = {
+  version: bigint;
+  sourceDomain: number;
+  destinationDomain: number;
+  sourceContract: Hex;
+  destinationContract: Hex;
+  sourceToken: Hex;
+  destinationToken: Hex;
+  sourceDepositor: Hex;
+  destinationRecipient: Hex;
+  sourceSigner: Hex;
+  destinationCaller: Hex;
+  value: bigint;
+  salt: Hex;
+  hookData: Hex;
+};
+
+type BurnIntent = {
+  maxBlockHeight: bigint;
+  maxFee: bigint;
+  feeToken: Hex;
+  sourceDomain: number;
+  destinationDomain: number;
+  spec: TransferSpec;
+};
+
+const addressToBytes32 = (address: Address): Hex => {
+  return pad(address as Hex, { size: 32 });
+};
+
+const getRandomSalt = (): Hex => {
+  if (typeof crypto !== "undefined" && "getRandomValues" in crypto) {
+    const bytes = new Uint8Array(32);
+    crypto.getRandomValues(bytes);
+    return toHex(bytes);
+  }
+  const fallback = Array.from({ length: 32 }, () => Math.floor(Math.random() * 256));
+  return toHex(new Uint8Array(fallback));
+};
+
+/**
+ * Retry helper for Arc RPC endpoint instability
+ * Uses exponential backoff: 2s → 4s → 8s
+ */
+async function retryTransaction<T>(fn: () => Promise<T>, maxRetries = 3, delayMs = 2000): Promise<T> {
+  let lastError: Error | undefined;
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error: any) {
+      lastError = error;
+
+      // Check if it's an RPC error
+      const isRpcError =
+        error?.message?.includes("RPC endpoint") || error?.message?.includes("Requested resource not available");
+
+      if (!isRpcError || attempt === maxRetries - 1) {
+        throw error;
+      }
+
+      // Wait before retrying with exponential backoff
+      const delay = delayMs * Math.pow(2, attempt);
+      console.log(`RPC error detected, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries})`);
+      notification.info(`RPC issue detected, retrying in ${delay / 1000}s...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+
+  throw lastError || new Error("Transaction failed after retries");
+}
+
+/**
+ * Chain validation helper
+ * Ensures user hasn't manually switched chains mid-zap
+ */
+async function ensureCorrectChain(walletClient: any, expectedChainId: number, chainName: string): Promise<void> {
+  const currentChainId = await walletClient.getChainId();
+  if (currentChainId !== expectedChainId) {
+    throw new Error(
+      `Wrong chain: expected ${chainName} (${expectedChainId}) but wallet is on chain ${currentChainId}. Please switch your wallet to ${chainName}.`,
+    );
+  }
+}
+
+const computeMaxFee = (amount: bigint, chainKey: GatewayChainKey): bigint => {
+  const gasFeeMap: Record<GatewayChainKey, bigint> = {
+    sepolia: 2_000_000n, // 2.00 USDC
+    baseSepolia: 10_000n, // 0.01 USDC
+    avalancheFuji: 20_000n, // 0.02 USDC
+  };
+  const gasFee = gasFeeMap[chainKey] ?? 0n;
+  const transferFee = (amount * 5n) / 100_000n; // amount * 0.00005
+  const baseFee = gasFee + transferFee;
+  const buffer = (baseFee * 10n) / 100n; // +10%
+  return baseFee + buffer;
+};
 
 const erc20Abi = [
   {
@@ -190,16 +288,17 @@ const gatewayWalletAbi = [
     outputs: [],
     stateMutability: "nonpayable",
   },
+] as const;
+
+const gatewayMinterAbi = [
   {
     type: "function",
-    name: "depositForBurn",
+    name: "gatewayMint",
     inputs: [
-      { name: "amount", type: "uint256" },
-      { name: "destinationDomain", type: "uint32" },
-      { name: "mintRecipient", type: "bytes32" },
-      { name: "burnToken", type: "address" },
+      { name: "attestationPayload", type: "bytes" },
+      { name: "signature", type: "bytes" },
     ],
-    outputs: [{ name: "nonce", type: "uint64" }],
+    outputs: [],
     stateMutability: "nonpayable",
   },
 ] as const;
@@ -210,7 +309,6 @@ const gatewayWalletAbi = [
  * @returns Object containing zap functions and state
  * @property {Function} getQuote - Fetch quote for zapping token to yRWA
  * @property {Function} executeZap - Execute full zap flow (swap + bridge + deposit)
- * @property {Function} claimAndDeposit - Manually claim bridged USDC and deposit to vault
  * @property {Function} reset - Reset hook state to idle
  * @property {ZapStatus} status - Current zap status (idle | quoting | swapping | etc.)
  * @property {ZapQuote | null} quote - Quote details (if available)
@@ -257,8 +355,6 @@ const gatewayWalletAbi = [
  *   await executeZap(quote);
  * } catch (err) {
  *   console.error('Zap failed:', error);
- *   // Check if USDC stuck in ZapReceiver
- *   await claimAndDeposit(userAddress);
  * }
  * ```
  *
@@ -404,7 +500,7 @@ export const useZapDeposit = () => {
         const sourceChainId = GATEWAY_CONFIG.chainIds[quote.sourceChain as GatewayChainKey];
         await switchChainAsync({ chainId: sourceChainId });
 
-        let usdcAmount = quote.sourceAmount;
+        const usdcAmount = quote.sourceAmount;
 
         // Step 2: If swap needed, execute LiFi swap
         if (quote.needsSwap && quote.lifiRoute) {
@@ -414,6 +510,9 @@ export const useZapDeposit = () => {
             progress: 20,
             currentStep: "Approving token for swap...",
           }));
+
+          // Validate we're on the correct source chain
+          await ensureCorrectChain(walletClient, sourceChainId, quote.sourceChain);
 
           // Approve token for LiFi
           const firstStep = quote.lifiRoute.steps[0];
@@ -453,16 +552,19 @@ export const useZapDeposit = () => {
 
           setState(prev => ({ ...prev, status: "swapping", progress: 35, currentStep: "Swapping to USDC..." }));
 
-          // Execute swap via LiFi
-          // Note: LiFi SDK executeRoute is complex - simplified here
-          // In production, use: await lifi.executeRoute(signer, quote.lifiRoute)
-          // For now, we'll assume swap succeeds and user ends up with USDC
-
-          notification.info("Swap completed successfully");
-          usdcAmount = quote.estimatedUSDC;
+          // TODO: LiFi swap execution not yet implemented
+          // Currently only USDC deposits are supported
+          // To enable multi-token deposits:
+          // 1. Install @lifi/sdk
+          // 2. Replace this error with: await lifi.executeRoute(signer, quote.lifiRoute)
+          // 3. Add swap transaction verification (check receipt.status)
+          // 4. Track swap hash in transactions array
+          throw new Error(
+            "Token swaps not yet supported. Please deposit USDC directly. Multi-token support coming soon.",
+          );
         }
 
-        // Step 3: Approve USDC for Circle Gateway
+        // Step 3: Approve USDC for GatewayWallet
         setState(prev => ({
           ...prev,
           status: "approving_gateway",
@@ -470,16 +572,17 @@ export const useZapDeposit = () => {
           currentStep: "Approving USDC for Gateway...",
         }));
 
+        // Validate we're still on the correct source chain
+        await ensureCorrectChain(walletClient, sourceChainId, quote.sourceChain);
+
         const usdcAddress = GATEWAY_CONFIG.usdc[quote.sourceChain as GatewayChainKey] as Address;
-        // IMPORTANT: Approve the TokenMinter contract (not GatewayWallet)
-        // because depositForBurn is called on TokenMinter
-        const tokenMinterAddress = GATEWAY_CONFIG.gatewayMinter as Address;
+        const gatewayWalletAddress = GATEWAY_CONFIG.gatewayWallet as Address;
 
         const approveHash = await walletClient.writeContract({
           address: usdcAddress,
           abi: erc20Abi,
           functionName: "approve",
-          args: [tokenMinterAddress, MAX_UINT256],
+          args: [gatewayWalletAddress, MAX_UINT256],
           account: address,
           gas: 100000n, // Set reasonable gas limit for approval
         });
@@ -507,29 +610,24 @@ export const useZapDeposit = () => {
           throw new Error("USDC approval transaction failed. Please try again.");
         }
 
-        // Step 4: Deposit to Circle Gateway with ZapReceiver as recipient
+        // Step 4: Deposit to GatewayWallet
         setState(prev => ({
           ...prev,
           status: "depositing_gateway",
           progress: 65,
-          currentStep: "Depositing to Gateway...",
+          currentStep: "Depositing to Gateway Wallet...",
         }));
 
-        // Get ZapReceiver address from config and convert to bytes32 for Circle Gateway
-        const zapReceiverAddress = GATEWAY_CONFIG.zapReceiverAddress as Address;
-        // Remove '0x' prefix, pad to 32 bytes, add back '0x' prefix
-        const mintRecipient = `0x${zapReceiverAddress.slice(2).padStart(64, "0")}` as `0x${string}`;
-
-        // Get destination domain for Arc testnet from config
-        const destinationDomain = GATEWAY_CONFIG.domains.arcTestnet;
+        // Validate we're still on the correct source chain before deposit
+        await ensureCorrectChain(walletClient, sourceChainId, quote.sourceChain);
 
         const depositHash = await walletClient.writeContract({
-          address: GATEWAY_CONFIG.gatewayMinter as Address, // Use TokenMinter for depositForBurn
+          address: GATEWAY_CONFIG.gatewayWallet as Address,
           abi: gatewayWalletAbi,
-          functionName: "depositForBurn",
-          args: [usdcAmount, destinationDomain, mintRecipient, usdcAddress],
+          functionName: "deposit",
+          args: [usdcAddress, usdcAmount],
           account: address,
-          gas: 500000n, // Manually set gas limit to avoid exceeding network cap
+          gas: 300000n,
         });
 
         setState(prev => ({
@@ -541,7 +639,7 @@ export const useZapDeposit = () => {
             {
               hash: depositHash,
               chainId: chainMap[quote.sourceChain as keyof typeof chainMap].id,
-              step: "Circle Gateway Deposit",
+              step: "Gateway Wallet Deposit",
               timestamp: Date.now(),
             },
           ],
@@ -552,39 +650,286 @@ export const useZapDeposit = () => {
           updateZap(currentZapTimestamp, { txHash: depositHash });
         }
 
-        // Wait for transaction and check if it succeeded
-        const receipt = await getPublicClient(quote.sourceChain).waitForTransactionReceipt({
+        const depositReceipt = await getPublicClient(quote.sourceChain).waitForTransactionReceipt({
           hash: depositHash,
           timeout: 60_000,
         });
 
-        // Check if transaction was successful
-        if (receipt.status === "reverted") {
-          throw new Error("Gateway deposit transaction failed. Please check the transaction on the block explorer.");
+        if (depositReceipt.status === "reverted") {
+          throw new Error("Gateway wallet deposit failed. Please check the transaction on the block explorer.");
         }
 
-        // Step 5: Wait for Circle Gateway bridge (passive)
+        // Step 5: Build and sign burn intent
         setState(prev => ({
           ...prev,
-          status: "bridging",
+          status: "signing_intent",
           progress: 75,
-          currentStep: "Bridging to Arc (this may take 5-10 minutes)...",
-          txHash: depositHash,
-          txChainId: chainMap[quote.sourceChain as keyof typeof chainMap].id,
+          currentStep: "Signing burn intent...",
         }));
 
-        notification.success(
-          "Deposit submitted to Gateway! Your USDC will arrive on Arc in 5-10 minutes. You'll need to claim it to receive yRWA.",
+        const destinationDomain = GATEWAY_CONFIG.domains.arcTestnet;
+        const sourceDomain = GATEWAY_CONFIG.domains[quote.sourceChain as GatewayChainKey];
+        const burnIntent: BurnIntent = {
+          maxBlockHeight: maxUint256,
+          maxFee: computeMaxFee(usdcAmount, quote.sourceChain as GatewayChainKey),
+          feeToken: addressToBytes32(usdcAddress), // Fee paid in USDC
+          sourceDomain,
+          destinationDomain,
+          spec: {
+            version: 1n,
+            sourceDomain,
+            destinationDomain,
+            sourceContract: addressToBytes32(GATEWAY_CONFIG.gatewayWallet as Address),
+            destinationContract: addressToBytes32(GATEWAY_CONFIG.gatewayMinter as Address),
+            sourceToken: addressToBytes32(usdcAddress),
+            destinationToken: addressToBytes32(GATEWAY_CONFIG.destinationUsdc as Address),
+            sourceDepositor: addressToBytes32(address),
+            destinationRecipient: addressToBytes32(GATEWAY_CONFIG.zapReceiverAddress as Address),
+            sourceSigner: addressToBytes32(address),
+            destinationCaller: addressToBytes32(address),
+            value: usdcAmount,
+            salt: getRandomSalt(),
+            hookData: "0x",
+          },
+        };
+
+        const signature = await walletClient.signTypedData({
+          account: address,
+          domain: { name: "GatewayWallet", version: "1" },
+          primaryType: "BurnIntent",
+          types: {
+            TransferSpec: [
+              { name: "version", type: "uint256" },
+              { name: "sourceDomain", type: "uint32" },
+              { name: "destinationDomain", type: "uint32" },
+              { name: "sourceContract", type: "bytes32" },
+              { name: "destinationContract", type: "bytes32" },
+              { name: "sourceToken", type: "bytes32" },
+              { name: "destinationToken", type: "bytes32" },
+              { name: "sourceDepositor", type: "bytes32" },
+              { name: "destinationRecipient", type: "bytes32" },
+              { name: "sourceSigner", type: "bytes32" },
+              { name: "destinationCaller", type: "bytes32" },
+              { name: "value", type: "uint256" },
+              { name: "salt", type: "bytes32" },
+              { name: "hookData", type: "bytes" },
+            ],
+            BurnIntent: [
+              { name: "maxBlockHeight", type: "uint256" },
+              { name: "maxFee", type: "uint256" },
+              { name: "feeToken", type: "bytes32" },
+              { name: "sourceDomain", type: "uint32" },
+              { name: "destinationDomain", type: "uint32" },
+              { name: "spec", type: "TransferSpec" },
+            ],
+          },
+          message: burnIntent,
+        });
+
+        // Step 6: Submit transfer to Gateway API
+        setState(prev => ({
+          ...prev,
+          status: "transferring_gateway",
+          progress: 82,
+          currentStep: "Submitting transfer to Gateway...",
+        }));
+
+        const transferPayload: TransferIntent = {
+          burnIntent: {
+            maxBlockHeight: burnIntent.maxBlockHeight.toString(),
+            maxFee: burnIntent.maxFee.toString(),
+            feeToken: burnIntent.feeToken,
+            sourceDomain: burnIntent.sourceDomain,
+            destinationDomain: burnIntent.destinationDomain,
+            spec: {
+              version: burnIntent.spec.version.toString(),
+              sourceDomain: burnIntent.spec.sourceDomain,
+              destinationDomain: burnIntent.spec.destinationDomain,
+              sourceContract: burnIntent.spec.sourceContract,
+              destinationContract: burnIntent.spec.destinationContract,
+              sourceToken: burnIntent.spec.sourceToken,
+              destinationToken: burnIntent.spec.destinationToken,
+              sourceDepositor: burnIntent.spec.sourceDepositor,
+              destinationRecipient: burnIntent.spec.destinationRecipient,
+              sourceSigner: burnIntent.spec.sourceSigner,
+              destinationCaller: burnIntent.spec.destinationCaller,
+              value: burnIntent.spec.value.toString(),
+              salt: burnIntent.spec.salt,
+              hookData: burnIntent.spec.hookData,
+            },
+          },
+          signature,
+        };
+
+        const transferResponse = await submitTransfer([transferPayload]);
+
+        // Validate Gateway API response
+        if (!transferResponse?.attestation || !transferResponse?.signature) {
+          throw new Error("Invalid Gateway API response: missing attestation or signature");
+        }
+        if (!transferResponse.transferId) {
+          throw new Error("Invalid Gateway API response: missing transferId");
+        }
+        if ((transferResponse as any).error) {
+          throw new Error(`Gateway API error: ${(transferResponse as any).error}`);
+        }
+
+        // Step 7: Switch to Arc and mint via GatewayMinter
+        setState(prev => ({
+          ...prev,
+          status: "minting_gateway",
+          progress: 90,
+          currentStep: "Minting USDC on Arc...",
+        }));
+
+        await switchChainAsync({ chainId: GATEWAY_CONFIG.destinationChainId });
+
+        // Validate we're on Arc before minting
+        await ensureCorrectChain(walletClient, GATEWAY_CONFIG.destinationChainId, "Arc Testnet");
+
+        const arcClient = getPublicClient("arcTestnet");
+        const balanceBefore = (await arcClient.readContract({
+          address: GATEWAY_CONFIG.destinationUsdc as Address,
+          abi: erc20Abi,
+          functionName: "balanceOf",
+          args: [GATEWAY_CONFIG.zapReceiverAddress as Address],
+        })) as bigint;
+
+        notification.info("Minting USDC on Arc via Gateway...");
+        const mintHash = await retryTransaction(
+          async () =>
+            await walletClient.writeContract({
+              address: GATEWAY_CONFIG.gatewayMinter as Address,
+              abi: gatewayMinterAbi,
+              functionName: "gatewayMint",
+              args: [transferResponse.attestation as Hex, transferResponse.signature as Hex],
+              account: address,
+              chain: chains.arcTestnet,
+              gas: 600000n,
+            }),
         );
 
-        // After bridge completes (user needs to manually trigger claim)
-        // Move to awaiting claim state
         setState(prev => ({
           ...prev,
-          status: "awaiting_claim",
-          progress: 85,
-          currentStep: "USDC arrived on Arc! Click 'Claim & Deposit' to receive yRWA.",
+          txHash: mintHash,
+          txChainId: chains.arcTestnet.id,
+          transactions: [
+            ...prev.transactions,
+            {
+              hash: mintHash,
+              chainId: chains.arcTestnet.id,
+              step: "Gateway Mint",
+              timestamp: Date.now(),
+            },
+          ],
         }));
+
+        // Wait for receipt AND verify status
+        const mintReceipt = await arcClient.waitForTransactionReceipt({
+          hash: mintHash,
+          timeout: 60_000,
+        });
+
+        if (mintReceipt.status === "reverted") {
+          throw new Error("Gateway mint transaction reverted. Check attestation validity.");
+        }
+
+        const balanceAfter = (await arcClient.readContract({
+          address: GATEWAY_CONFIG.destinationUsdc as Address,
+          abi: erc20Abi,
+          functionName: "balanceOf",
+          args: [GATEWAY_CONFIG.zapReceiverAddress as Address],
+        })) as bigint;
+
+        const mintedAmount = balanceAfter - balanceBefore;
+
+        // Validate minted amount matches expectations (with small tolerance for fees)
+        const expectedAmount = quote.estimatedUSDC;
+        const tolerance = parseUnits("0.01", 6); // 1 cent tolerance
+
+        if (mintedAmount < expectedAmount - tolerance) {
+          throw new Error(
+            `Minted amount (${(Number(mintedAmount) / 1e6).toFixed(2)} USDC) is less than expected (${(Number(expectedAmount) / 1e6).toFixed(2)} USDC)`,
+          );
+        }
+
+        if (mintedAmount <= 0n) {
+          throw new Error("Gateway mint succeeded but no USDC was credited to ZapReceiver.");
+        }
+
+        // Step 8: Deposit to vault via ZapReceiver
+        setState(prev => ({
+          ...prev,
+          status: "depositing_vault",
+          progress: 96,
+          currentStep: "Depositing to vault...",
+        }));
+
+        const zapReceiverAbi = [
+          {
+            type: "function",
+            name: "processBridgedDeposit",
+            inputs: [
+              { name: "recipient", type: "address" },
+              { name: "amount", type: "uint256" },
+            ],
+            outputs: [{ name: "success", type: "bool" }],
+            stateMutability: "nonpayable",
+          },
+        ] as const;
+
+        // Validate we're still on Arc before vault deposit
+        await ensureCorrectChain(walletClient, GATEWAY_CONFIG.destinationChainId, "Arc Testnet");
+
+        notification.info("Depositing to vault via ZapReceiver...");
+        const vaultHash = await retryTransaction(
+          async () =>
+            await walletClient.writeContract({
+              address: GATEWAY_CONFIG.zapReceiverAddress as Address,
+              abi: zapReceiverAbi,
+              functionName: "processBridgedDeposit",
+              args: [address, mintedAmount],
+              account: address,
+              chain: chains.arcTestnet,
+              gas: 600000n,
+            }),
+        );
+
+        setState(prev => ({
+          ...prev,
+          txHash: vaultHash,
+          txChainId: chains.arcTestnet.id,
+          transactions: [
+            ...prev.transactions,
+            {
+              hash: vaultHash,
+              chainId: chains.arcTestnet.id,
+              step: "Vault Deposit",
+              timestamp: Date.now(),
+            },
+          ],
+        }));
+
+        // Wait for receipt AND verify status
+        const vaultReceipt = await arcClient.waitForTransactionReceipt({
+          hash: vaultHash,
+          timeout: 60_000,
+        });
+
+        if (vaultReceipt.status === "reverted") {
+          throw new Error(
+            "Vault deposit via ZapReceiver reverted. Funds are in pendingDeposits - use claimAndDeposit().",
+          );
+        }
+
+        setState(prev => ({
+          ...prev,
+          status: "completed",
+          progress: 100,
+          currentStep: "Zap completed! yRWA tokens received.",
+        }));
+
+        notification.success("Zap completed! Check your yRWA balance.");
       } catch (error) {
         const message = error instanceof Error ? error.message : "Zap failed";
         setState(prev => ({
@@ -608,107 +953,6 @@ export const useZapDeposit = () => {
   /**
    * Claim bridged USDC and deposit to vault on Arc
    */
-  const claimAndDeposit = useCallback(
-    async (amount: bigint) => {
-      if (!address || !walletClient) {
-        notification.error("Connect your wallet to continue");
-        return;
-      }
-
-      try {
-        setState(prev => ({ ...prev, status: "claiming", progress: 90, currentStep: "Switching to Arc..." }));
-
-        // Switch to Arc testnet and wait for it to complete
-        await switchChainAsync({ chainId: GATEWAY_CONFIG.destinationChainId });
-
-        // Add small delay to ensure wallet client has updated
-        await new Promise(resolve => setTimeout(resolve, 500));
-
-        setState(prev => ({ ...prev, currentStep: "Claiming and depositing USDC..." }));
-
-        // Call ZapReceiver.processBridgedDeposit()
-        const zapReceiverAbi = [
-          {
-            type: "function",
-            name: "processBridgedDeposit",
-            inputs: [
-              { name: "recipient", type: "address" },
-              { name: "amount", type: "uint256" },
-            ],
-            outputs: [{ name: "success", type: "bool" }],
-            stateMutability: "nonpayable",
-          },
-        ] as const;
-
-        const claimHash = await walletClient.writeContract({
-          address: GATEWAY_CONFIG.zapReceiverAddress as Address,
-          abi: zapReceiverAbi,
-          functionName: "processBridgedDeposit",
-          args: [address, amount],
-          account: address,
-          chain: chains.arcTestnet, // Explicitly specify the chain
-          gas: 500000n, // Set reasonable gas limit for claim transaction
-        });
-
-        setState(prev => ({
-          ...prev,
-          status: "depositing_vault",
-          progress: 95,
-          currentStep: "Depositing to vault...",
-          txHash: claimHash,
-          txChainId: chains.arcTestnet.id,
-          transactions: [
-            ...prev.transactions,
-            {
-              hash: claimHash,
-              chainId: chains.arcTestnet.id,
-              step: "Claim & Deposit to Vault",
-              timestamp: Date.now(),
-            },
-          ],
-        }));
-
-        // Wait for transaction
-        await createPublicClient({
-          chain: chains.arcTestnet,
-          transport: http(),
-        }).waitForTransactionReceipt({
-          hash: claimHash,
-          timeout: 60_000,
-        });
-
-        // Mark as completed
-        setState(prev => ({
-          ...prev,
-          status: "completed",
-          progress: 100,
-          currentStep: "Zap completed! yRWA tokens received.",
-        }));
-        notification.success("Successfully claimed and deposited! Check your yRWA balance.");
-
-        // Update history as completed
-        if (currentZapTimestamp) {
-          updateZap(currentZapTimestamp, { status: "completed" });
-        }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Claim failed";
-        setState(prev => ({
-          ...prev,
-          status: "failed",
-          error: message,
-          progress: 0,
-          currentStep: "Failed",
-        }));
-        notification.error(message);
-
-        // Update history as failed
-        if (currentZapTimestamp) {
-          updateZap(currentZapTimestamp, { status: "failed", error: message });
-        }
-      }
-    },
-    [address, walletClient, switchChainAsync, updateZap, currentZapTimestamp],
-  );
 
   /**
    * Reset state
@@ -730,7 +974,6 @@ export const useZapDeposit = () => {
     state,
     getQuote,
     executeZap,
-    claimAndDeposit,
     reset,
   };
 };

@@ -45,6 +45,9 @@ contract ZapReceiver is Ownable, ReentrancyGuard {
     /// @param available Amount actually pending
     error InsufficientPendingDeposits(uint256 requested, uint256 available);
 
+    /// @notice Thrown when vault deposit returns zero shares
+    error InsufficientSharesMinted();
+
     /// @notice Thrown when contract has insufficient USDC balance
     /// @param requested Amount requested
     /// @param available USDC balance in contract
@@ -267,15 +270,22 @@ contract ZapReceiver is Ownable, ReentrancyGuard {
         // Clear pending before external calls
         pendingDeposits[msg.sender] = 0;
 
+        // Get shares balance BEFORE deposit
+        uint256 sharesBefore = IERC20(address(vault.yieldToken())).balanceOf(address(this));
+
         // Approve and deposit to vault
         usdc.approve(address(vault), amount);
         vault.deposit(amount);
 
-        // Get shares and transfer to user
-        uint256 shares = IERC20(address(vault.yieldToken())).balanceOf(address(this));
-        if (shares > 0) {
-            IERC20(address(vault.yieldToken())).safeTransfer(msg.sender, shares);
+        // Get shares balance AFTER deposit and calculate delta
+        uint256 sharesAfter = IERC20(address(vault.yieldToken())).balanceOf(address(this));
+        uint256 shares = sharesAfter - sharesBefore;
+
+        if (shares == 0) {
+            revert InsufficientSharesMinted();
         }
+
+        IERC20(address(vault.yieldToken())).safeTransfer(msg.sender, shares);
 
         emit PendingDepositClaimed(msg.sender, amount, shares);
     }

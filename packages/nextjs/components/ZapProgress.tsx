@@ -25,27 +25,33 @@ const STEPS: Step[] = [
   },
   {
     key: "gateway",
-    label: "Deposit to Circle Gateway",
+    label: "Deposit to Gateway Wallet",
     icon: "🌉",
     statuses: ["approving_gateway", "depositing_gateway"],
   },
   {
-    key: "bridge",
-    label: "Bridging to Arc",
-    icon: "⏳",
-    statuses: ["bridging"],
+    key: "intent",
+    label: "Sign burn intent",
+    icon: "✍️",
+    statuses: ["signing_intent"],
   },
   {
-    key: "claim",
-    label: "Ready to claim on Arc",
-    icon: "👆",
-    statuses: ["awaiting_claim"],
+    key: "transfer",
+    label: "Gateway transfer",
+    icon: "🔁",
+    statuses: ["transferring_gateway"],
+  },
+  {
+    key: "mint",
+    label: "Mint on Arc",
+    icon: "✨",
+    statuses: ["minting_gateway"],
   },
   {
     key: "vault",
     label: "Depositing to vault",
     icon: "🏦",
-    statuses: ["claiming", "depositing_vault"],
+    statuses: ["depositing_vault"],
   },
   {
     key: "done",
@@ -167,14 +173,13 @@ export const ZapProgress = ({ state }: Props) => {
         </div>
       )}
 
-      {/* Bridging Info */}
-      {state.status === "bridging" && (
+      {/* Gateway Transfer Info */}
+      {state.status === "transferring_gateway" && (
         <div className="alert">
           <div className="flex flex-col gap-1">
-            <span className="font-semibold">⏳ Bridging in Progress</span>
+            <span className="font-semibold">⏳ Gateway Transfer In Progress</span>
             <span className="text-sm">
-              Circle Gateway is bridging your USDC to Arc. This typically takes 5-10 minutes. You can safely close this
-              page - the ZapReceiver will automatically complete the vault deposit when your USDC arrives on Arc.
+              Circle Gateway is preparing your transfer. This typically takes a short time before minting on Arc.
             </span>
           </div>
         </div>

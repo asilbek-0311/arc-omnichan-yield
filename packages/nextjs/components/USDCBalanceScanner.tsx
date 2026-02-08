@@ -20,7 +20,6 @@ const chainMap = {
   sepolia: chains.sepolia,
   avalancheFuji: chains.avalancheFuji,
   baseSepolia: chains.baseSepolia,
-  arbitrumSepolia: chains.arbitrumSepolia,
 } as const;
 
 type BalanceRow = {
@@ -159,8 +158,8 @@ export const USDCBalanceScanner = ({ onSelectionChange }: Props) => {
                   />
                 </svg>
                 <span>
-                  No USDC detected on any supported chains. Please acquire USDC on Sepolia, Arbitrum Sepolia, Base
-                  Sepolia, or Avalanche Fuji to continue.
+                  No USDC detected on any supported chains. Please acquire USDC on Sepolia, Base Sepolia, or Avalanche
+                  Fuji to continue.
                 </span>
               </div>
             )}

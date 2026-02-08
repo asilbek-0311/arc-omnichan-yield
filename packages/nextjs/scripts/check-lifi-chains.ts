@@ -11,14 +11,12 @@ async function checkChains() {
 
     const testnetChainIds = [
       11155111, // Sepolia
-      421614, // Arbitrum Sepolia
       84532, // Base Sepolia
       43113, // Avalanche Fuji
     ];
 
     const testnetNames: Record<number, string> = {
       11155111: "Ethereum Sepolia",
-      421614: "Arbitrum Sepolia",
       84532: "Base Sepolia",
       43113: "Avalanche Fuji",
     };

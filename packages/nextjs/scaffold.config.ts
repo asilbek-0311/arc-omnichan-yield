@@ -18,7 +18,6 @@ const scaffoldConfig = {
   targetNetworks: [
     chains.arcTestnet,
     chains.sepolia,
-    chains.arbitrumSepolia,
     chains.baseSepolia,
     chains.avalancheFuji,
     chains.foundry,
@@ -38,8 +37,8 @@ const scaffoldConfig = {
   // If you want to use a different RPC for a specific network, you can add it here.
   // The key is the chain ID, and the value is the HTTP RPC URL
   rpcOverrides: {
-    // Example:
-    // [chains.mainnet.id]: "https://mainnet.rpc.buidlguidl.com",
+    // Arc Testnet - use QuickNode endpoint for better reliability
+    [chains.arcTestnet.id]: "https://rpc.quicknode.testnet.arc.network",
   },
   // This is ours WalletConnect's default project ID.
   // You can get your own at https://cloud.walletconnect.com

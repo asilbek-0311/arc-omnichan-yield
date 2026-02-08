@@ -102,12 +102,6 @@ const externalContracts = {
       abi: erc20Abi,
     },
   },
-  421614: {
-    USDC: {
-      address: "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d",
-      abi: erc20Abi,
-    },
-  },
   5042002: {
     USDC: {
       address: "0x3600000000000000000000000000000000000000",

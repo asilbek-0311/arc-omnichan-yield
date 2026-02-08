@@ -51,7 +51,6 @@ const chainMap = {
   sepolia: chains.sepolia,
   avalancheFuji: chains.avalancheFuji,
   baseSepolia: chains.baseSepolia,
-  arbitrumSepolia: chains.arbitrumSepolia,
 } as const;
 
 const getPublicClient = (chainKey: GatewayChainKey) => {
@@ -79,12 +78,6 @@ export const useMultiChainDeposit = () => {
       status: "idle",
     },
     baseSepolia: { chainKey: "baseSepolia", chainId: GATEWAY_CONFIG.chainIds.baseSepolia, amount: 0n, status: "idle" },
-    arbitrumSepolia: {
-      chainKey: "arbitrumSepolia",
-      chainId: GATEWAY_CONFIG.chainIds.arbitrumSepolia,
-      amount: 0n,
-      status: "idle",
-    },
   });
 
   const updateState = useCallback((chainKey: GatewayChainKey, patch: Partial<ChainDepositState>) => {

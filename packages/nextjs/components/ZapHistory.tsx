@@ -8,7 +8,6 @@ import { getBlockExplorerTxLink } from "~~/utils/scaffold-eth";
 const getChainName = (chainKey: string): string => {
   const names: Record<string, string> = {
     sepolia: "Sepolia",
-    arbitrumSepolia: "Arbitrum Sepolia",
     baseSepolia: "Base Sepolia",
     avalancheFuji: "Avalanche Fuji",
   };

@@ -1,6 +1,6 @@
 import { wagmiConnectors } from "./wagmiConnectors";
 import { Chain, createClient, fallback, http } from "viem";
-import { hardhat, mainnet } from "viem/chains";
+import { arcTestnet, hardhat, mainnet } from "viem/chains";
 import { createConfig } from "wagmi";
 import scaffoldConfig, { DEFAULT_ALCHEMY_API_KEY, ScaffoldConfig } from "~~/scaffold.config";
 import { getAlchemyHttpUrl } from "~~/utils/scaffold-eth";
@@ -20,15 +20,28 @@ export const wagmiConfig = createConfig({
     const mainnetFallbackWithDefaultRPC = [http("https://mainnet.rpc.buidlguidl.com")];
     let rpcFallbacks = [...(chain.id === mainnet.id ? mainnetFallbackWithDefaultRPC : []), http()];
     const rpcOverrideUrl = (scaffoldConfig.rpcOverrides as ScaffoldConfig["rpcOverrides"])?.[chain.id];
+
+    // Arc Testnet needs more aggressive retry config due to RPC instability
+    const isArcTestnet = chain.id === arcTestnet.id;
+    const retryConfig = isArcTestnet
+      ? {
+          retryCount: 5, // More retries for Arc
+          retryDelay: 1000, // Start with 1s delay
+        }
+      : {
+          retryCount: 3,
+          retryDelay: 150,
+        };
+
     if (rpcOverrideUrl) {
-      rpcFallbacks = [http(rpcOverrideUrl), ...rpcFallbacks];
+      rpcFallbacks = [http(rpcOverrideUrl, retryConfig), ...rpcFallbacks];
     } else {
       const alchemyHttpUrl = getAlchemyHttpUrl(chain.id);
       if (alchemyHttpUrl) {
         const isUsingDefaultKey = scaffoldConfig.alchemyApiKey === DEFAULT_ALCHEMY_API_KEY;
         rpcFallbacks = isUsingDefaultKey
-          ? [...rpcFallbacks, http(alchemyHttpUrl)]
-          : [http(alchemyHttpUrl), ...rpcFallbacks];
+          ? [...rpcFallbacks, http(alchemyHttpUrl, retryConfig)]
+          : [http(alchemyHttpUrl, retryConfig), ...rpcFallbacks];
       }
     }
     return createClient({
